@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  @keyframes slide-down-fade {
+    0% {
+      opacity: 0;
+      transform: translateY(-40px) scale(0.98);
+    }
+    20% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    80% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-40px) scale(0.98);
+    }
+  }
+  .animate-slide-down-fade {
+    animation: slide-down-fade 3s cubic-bezier(0.4,0,0.2,1);
+  }
+}
