@@ -131,18 +131,18 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({
           <div>
             <label className="text-sm font-medium text-gray-500">Approval Flow</label>
             <div className="mt-2 space-y-2">
-              {['Teacher', 'HOD'].map((level, index) => (
+              {request.approvalFlow && request.approvalFlow.map((level, index) => (
                 <div key={index} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
                   <div className={`w-3 h-3 rounded-full ${
                     level === request.currentApprovalLevel ? 'bg-blue-500' :
-                    ['Teacher', 'HOD'].indexOf(request.currentApprovalLevel || 'Teacher') > index ? 'bg-green-500' :
+                    request.approvalFlow && index < request.approvalFlow.indexOf(request.currentApprovalLevel || 'HOD') ? 'bg-green-500' :
                     'bg-gray-300'
                   }`}></div>
                   <div className="flex-1">
                     <span className="font-medium text-gray-900">{level}</span>
                     <p className="text-sm text-gray-600">
                       {level === request.currentApprovalLevel ? 'Current Level' : 
-                       ['Teacher', 'HOD'].indexOf(request.currentApprovalLevel || 'Teacher') > index ? 'Completed' : 
+                       request.approvalFlow && index < request.approvalFlow.indexOf(request.currentApprovalLevel || 'HOD') ? 'Completed' : 
                        'Pending'}
                     </p>
                   </div>
@@ -290,32 +290,44 @@ const LeaveApprovalPanel: React.FC = () => {
     console.log('[LeaveApprovalPanel] Starting approval action:', action, 'for request:', selectedRequest.id);
     console.log('[LeaveApprovalPanel] Current user:', user);
 
+    // Map UI action to backend status
+    const statusMap = {
+      approve: 'approved',
+      reject: 'rejected',
+      return: 'returned',
+    } as const;
+    const backendStatus = statusMap[action];
+    if (!backendStatus) return; // Defensive: should never happen
+    if (!user?.id) return; // Defensive: must have user id
+    if (!selectedRequest.id) return;
+
     try {
-      await leaveService.updateLeaveRequestStatus(selectedRequest.id, action, user?.id, remarks);
-    setBanner({
-      type: action,
-      message:
-        action === 'approve'
-          ? 'Leave request approved successfully!'
-          : action === 'reject'
-          ? 'Leave request rejected.'
-          : 'Leave request returned for revision.'
-    });
-    setTimeout(() => setBanner(null), 3000);
+      await leaveService.updateLeaveRequestStatus(selectedRequest.id!, backendStatus, user.id, remarks);
+      setBanner({
+        type: action,
+        message:
+          action === 'approve'
+            ? 'Leave request approved successfully!'
+            : action === 'reject'
+            ? 'Leave request rejected.'
+            : 'Leave request returned for revision.'
+      });
+      setTimeout(() => setBanner(null), 3000);
       // Refresh the list after action
       const updatedRequests = await leaveService.getLeaveRequestsByApprover(user?.id || '');
       setLeaveRequests(updatedRequests);
-    } catch (error: any) {
-      console.error("[LeaveApprovalPanel] Error updating leave request status:", error);
-      console.error("[LeaveApprovalPanel] Error message:", error.message);
-      console.error("[LeaveApprovalPanel] Error code:", error.code);
+    } catch (error) {
+      const err = error as any;
+      console.error("[LeaveApprovalPanel] Error updating leave request status:", err);
+      console.error("[LeaveApprovalPanel] Error message:", err.message);
+      console.error("[LeaveApprovalPanel] Error code:", err.code);
       
       let errorMessage = 'Failed to update leave request status.';
-      if (error.message) {
-        errorMessage += ` ${error.message}`;
+      if (err.message) {
+        errorMessage += ` ${err.message}`;
       }
-      if (error.code) {
-        errorMessage += ` (Code: ${error.code})`;
+      if (err.code) {
+        errorMessage += ` (Code: ${err.code})`;
       }
       
       setBanner({ type: 'reject', message: errorMessage });

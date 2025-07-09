@@ -51,14 +51,15 @@ const LeaveRequestForm: React.FC = () => {
         userId: user.id,
         userName: user.name,
         department: user.department,
-        leaveType: formData.leaveType as 'SL' | 'CL' | 'OD' | 'ML' | 'OTH',
+        leaveType: formData.leaveType as 'SL' | 'CL' | 'OD' | 'ML' | 'OTH' | 'EL' | 'LOP' | 'COH',
         fromDate: formData.fromDate,
         toDate: formData.toDate,
         reason: formData.reason,
         daysCount: daysRequested,
         submittedAt: new Date().toISOString(),
         currentApprovalLevel: 'Teacher', // Start with Teacher approval
-        approvalFlow: ['Teacher', 'HOD'] // Define approval hierarchy
+        approvalFlow: ['Teacher', 'HOD'], // Define approval hierarchy
+        status: 'pending' as 'pending', // Always pending on creation
       };
 
       // Save to Firestore

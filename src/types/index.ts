@@ -26,7 +26,7 @@ export interface LeaveRequest {
   userId: string;
   userName: string;
   department: string;
-  leaveType: 'CL' | 'ML' | 'EL' | 'LOP' | 'COH';
+  leaveType: 'CL' | 'ML' | 'EL' | 'LOP' | 'COH' | 'SL' | 'OD' | 'OTH';
   fromDate: string;
   toDate: string;
   reason: string;
