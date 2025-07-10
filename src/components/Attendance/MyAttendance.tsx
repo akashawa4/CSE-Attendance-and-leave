@@ -313,49 +313,40 @@ const MyAttendance: React.FC = () => {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      {/* Responsive controls row */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-0">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">My Attendance</h1>
           <p className="text-gray-600">Track your daily attendance and working hours</p>
         </div>
-        <div className="flex items-center space-x-2 relative w-full justify-end">
-          {/* Subject filter dropdown always visible */}
-          <div style={{ minWidth: 220, background: '#f3f4f6', border: '2px solid #6366f1', borderRadius: 8, padding: '8px 16px', marginRight: 24, boxShadow: '0 2px 8px #e0e7ef' }}>
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full md:w-auto">
+          <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1 w-full sm:w-auto">
+            <button
+              onClick={() => setViewType('calendar')}
+              className={`px-2 py-1 rounded-md text-sm font-medium transition-colors w-full sm:w-auto ${
+                viewType === 'calendar' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
+              }`}
+            >
+              Calendar
+            </button>
+          </div>
+          <button onClick={handleDownloadMonth} className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 w-full sm:w-auto">
+            <Download className="w-4 h-4" />
+            <span>Export Month</span>
+          </button>
+          <div className="flex items-center space-x-1 w-full sm:w-auto">
+            <input type="date" value={customRange.from} onChange={e => setCustomRange(r => ({...r, from: e.target.value}))} className="border rounded px-1 text-xs w-full sm:w-auto" />
+            <span>-</span>
+            <input type="date" value={customRange.to} onChange={e => setCustomRange(r => ({...r, to: e.target.value}))} className="border rounded px-1 text-xs w-full sm:w-auto" />
+            <button onClick={handleDownloadCustom} className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs w-full sm:w-auto">Export Custom</button>
+          </div>
+          {/* Export Subject dropdown right next to Export Custom */}
+          <div className="w-full sm:w-auto" style={{ minWidth: 180, background: '#f3f4f6', border: '2px solid #6366f1', borderRadius: 8, padding: '8px 8px' }}>
             <label className="text-sm font-semibold text-gray-700 mr-2">Export Subject:</label>
-            <select value={exportSubject} onChange={e => setExportSubject(e.target.value)} className="border rounded px-2 py-1 text-sm">
+            <select value={exportSubject} onChange={e => setExportSubject(e.target.value)} className="border rounded px-2 py-1 text-sm w-full sm:w-auto">
               <option value="">All</option>
               {FIXED_SUBJECTS.map(subj => <option key={subj} value={subj}>{subj}</option>)}
             </select>
-          </div>
-          <div className="flex items-center space-x-2">
-            <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1">
-              <button
-                onClick={() => setViewType('calendar')}
-                className={`px-2 py-1 rounded-md text-sm font-medium transition-colors ${
-                  viewType === 'calendar' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
-                }`}
-              >
-                Calendar
-              </button>
-              <button
-                onClick={() => setViewType('list')}
-                className={`px-2 py-1 rounded-md text-sm font-medium transition-colors ${
-                  viewType === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
-                }`}
-              >
-                List
-              </button>
-            </div>
-            <button onClick={handleDownloadMonth} className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-              <Download className="w-4 h-4" />
-              <span>Export Month</span>
-            </button>
-            <div className="flex items-center space-x-1">
-              <input type="date" value={customRange.from} onChange={e => setCustomRange(r => ({...r, from: e.target.value}))} className="border rounded px-1 text-xs" />
-              <span>-</span>
-              <input type="date" value={customRange.to} onChange={e => setCustomRange(r => ({...r, to: e.target.value}))} className="border rounded px-1 text-xs" />
-              <button onClick={handleDownloadCustom} className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs">Export Custom</button>
-            </div>
           </div>
         </div>
       </div>
@@ -368,7 +359,7 @@ const MyAttendance: React.FC = () => {
       ) : (
         <>
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
         <div className="bg-white p-2 rounded-lg border border-gray-200">
           <div className="flex items-center justify-between">
             <div>
@@ -424,40 +415,42 @@ const MyAttendance: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-7 gap-1">
-                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                  <div key={day} className="p-2 text-center text-sm font-medium text-gray-500">
-                    {day}
-                  </div>
-                ))}
-                
-                {calendarDays.map((day, index) => (
-                  <div
-                    key={index}
-                    className={`p-1 min-h-[60px] border border-gray-100 rounded-lg transition-colors duration-200
-                      ${!day.isCurrentMonth ? 'bg-gray-50' : day.attendance ? getStatusColor(day.attendance.status).split(' ')[0] : 'bg-white'}
-                      ${day.isToday ? 'ring-2 ring-blue-500' : ''}`}
-                  >
-                    <div className={`text-sm font-medium mb-1 ${!day.isCurrentMonth ? 'text-gray-400' : 'text-gray-900'}`}>
-                      {day.date.getDate()}
+              <div className="overflow-x-auto">
+                <div className="grid grid-cols-7 gap-1 min-w-[600px]">
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                    <div key={day} className="p-2 text-center text-sm font-medium text-gray-500">
+                      {day}
                     </div>
-                    {day.attendance && day.isCurrentMonth && (
-                      <div className="space-y-1">
-                        <div className={`text-xs px-1 py-0.5 rounded-full text-center ${getStatusColor(day.attendance.status)}`}> 
-                          {day.attendance.status.charAt(0).toUpperCase() + day.attendance.status.slice(1)}
-                        </div>
-                        {day.attendance.subject && (
-                          <div className="text-xs text-blue-700 text-center font-semibold">{day.attendance.subject}</div>
-                        )}
-                        {(day.attendance.status === 'present' || day.attendance.status === 'late') ? (
-                          <div className="text-xs text-gray-600 text-center">
-                            {day.attendance.clockIn} - {day.attendance.clockOut}
-                          </div>
-                        ) : null}
+                  ))}
+                  
+                  {calendarDays.map((day, index) => (
+                    <div
+                      key={index}
+                      className={`p-1 min-h-[60px] border border-gray-100 rounded-lg transition-colors duration-200
+                        ${!day.isCurrentMonth ? 'bg-gray-50' : day.attendance ? getStatusColor(day.attendance.status).split(' ')[0] : 'bg-white'}
+                        ${day.isToday ? 'ring-2 ring-blue-500' : ''}`}
+                    >
+                      <div className={`text-sm font-medium mb-1 ${!day.isCurrentMonth ? 'text-gray-400' : 'text-gray-900'}`}>
+                        {day.date.getDate()}
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {day.attendance && day.isCurrentMonth && (
+                        <div className="space-y-1">
+                          <div className={`text-xs px-1 py-0.5 rounded-full text-center ${getStatusColor(day.attendance.status)}`}> 
+                            {day.attendance.status.charAt(0).toUpperCase() + day.attendance.status.slice(1)}
+                          </div>
+                          {day.attendance.subject && (
+                            <div className="text-xs text-blue-700 text-center font-semibold">{day.attendance.subject}</div>
+                          )}
+                          {(day.attendance.status === 'present' || day.attendance.status === 'late') ? (
+                            <div className="text-xs text-gray-600 text-center">
+                              {day.attendance.clockIn} - {day.attendance.clockOut}
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="flex items-center justify-center space-x-2 mt-2 text-xs">
