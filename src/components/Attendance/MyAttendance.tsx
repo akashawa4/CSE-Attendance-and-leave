@@ -3,6 +3,8 @@ import { Calendar, Clock, TrendingUp, MapPin, Download, Filter, ChevronLeft, Che
 import { useAuth } from '../../contexts/AuthContext';
 import { attendanceService } from '../../firebase/firestore';
 import { AttendanceRecord } from '../../types';
+import { saveAs } from 'file-saver';
+import * as XLSX from 'xlsx';
 
 const MyAttendance: React.FC = () => {
   const { user } = useAuth();
@@ -20,7 +22,22 @@ const MyAttendance: React.FC = () => {
         setLoading(true);
         const records = await attendanceService.getAttendanceByUser(user.id);
 
-        setAttendanceData(records);
+        // Convert AttendanceLog[] to AttendanceRecord[]
+        const attendanceRecords: AttendanceRecord[] = records.map((log: any) => ({
+          id: log.id,
+          userId: log.userId,
+          date: typeof log.date === 'string' ? log.date : (log.date?.toISOString?.() || ''),
+          clockIn: typeof log.clockIn === 'string' ? log.clockIn : (log.clockIn?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' }) || ''),
+          clockOut: typeof log.clockOut === 'string' ? log.clockOut : (log.clockOut?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' }) || ''),
+          status: log.status,
+          workingHours: typeof log.workingHours === 'string' ? log.workingHours : (log.workingHours?.toString?.() || ''),
+          overtime: log.overtime || '',
+          location: log.location || '',
+          subject: log.subject || '',
+          notes: log.notes || '',
+          createdAt: log.createdAt || null,
+        }));
+        setAttendanceData(attendanceRecords);
       } catch (error) {
         console.error('Error loading attendance data:', error);
       } finally {
@@ -50,8 +67,8 @@ const MyAttendance: React.FC = () => {
     const workingHours = monthRecords
       .filter(r => r.workingHours && r.workingHours !== '---')
       .map(r => {
-        const hours = r.workingHours.split('h')[0];
-        const minutes = r.workingHours.split('h')[1]?.split('m')[0] || '0';
+        const [hours, minPart] = (r.workingHours || '0h 0m').split('h');
+        const minutes = minPart ? minPart.split('m')[0] : '0';
         return parseInt(hours) + parseInt(minutes) / 60;
       });
 
@@ -72,6 +89,177 @@ const MyAttendance: React.FC = () => {
   };
 
   const monthStats = calculateMonthStats();
+
+  // Helper to get unique subjects for the month
+  const getSubjectsForMonth = () => {
+    const year = selectedMonth.getFullYear();
+    const month = selectedMonth.getMonth();
+    const monthRecords = attendanceData.filter(record => {
+      const recordDate = new Date(record.date);
+      return recordDate.getFullYear() === year && recordDate.getMonth() === month;
+    });
+    return Array.from(new Set(monthRecords.map(r => r.subject).filter(Boolean)));
+  };
+
+  // Helper to filter attendance by subject
+  const getAttendanceBySubject = (subject: string) => {
+    const year = selectedMonth.getFullYear();
+    const month = selectedMonth.getMonth();
+    return attendanceData.filter(record => {
+      const recordDate = new Date(record.date);
+      return record.subject === subject && recordDate.getFullYear() === year && recordDate.getMonth() === month;
+    });
+  };
+
+  const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
+  const subjects = getSubjectsForMonth();
+
+  const FIXED_SUBJECTS = [
+    'Software Engineering',
+    'Microprocessor',
+    'Operating System',
+    'Automata',
+    'CN-1'
+  ];
+
+  // Add state for export subject filter
+  const [exportSubject, setExportSubject] = useState<string>('');
+
+  // Download helpers
+  const downloadCSV = (records: AttendanceRecord[], filename: string) => {
+    // Get all days in the selected month
+    const year = selectedMonth.getFullYear();
+    const month = selectedMonth.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    // Format each day as DD/MM/YYYY
+    const dayColumns = Array.from({ length: daysInMonth }, (_, i) => {
+      const d = i + 1;
+      const dd = d.toString().padStart(2, '0');
+      const mm = (month + 1).toString().padStart(2, '0');
+      return `${dd}/${mm}/${year}`;
+    });
+    const header = ['Sr No', 'Name', 'Roll No', 'Subject', ...dayColumns, 'Present %', 'Absent %'];
+
+    // Get all subjects for the month, plus fixed subjects
+    const monthRecords = records.filter(record => {
+      const recordDate = new Date(record.date);
+      return recordDate.getFullYear() === year && recordDate.getMonth() === month;
+    });
+    const monthSubjects = Array.from(new Set(monthRecords.map(r => r.subject).filter(Boolean)));
+    const subjects = Array.from(new Set([...FIXED_SUBJECTS, ...monthSubjects]));
+
+    // Filter subjects if exportSubject is set
+    const filteredSubjects = exportSubject ? subjects.filter(s => s === exportSubject) : subjects;
+
+    // Build rows: one per subject
+    const rows = filteredSubjects.map((subject, idx) => {
+      const row = [
+        idx + 1,
+        user?.name || '',
+        user?.employeeId || '',
+        subject
+      ];
+      // For each day, find the attendance status for this subject
+      let presentCount = 0;
+      let absentCount = 0;
+      let totalCount = 0;
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = new Date(year, month, d).toISOString().split('T')[0];
+        const rec = monthRecords.find(r => r.subject === subject && r.date === dateStr);
+        if (rec) {
+          row.push(rec.status);
+          totalCount++;
+          if (rec.status === 'present') presentCount++;
+          if (rec.status === 'absent') absentCount++;
+        } else {
+          row.push('');
+        }
+      }
+      // Calculate percentages
+      const presentPercent = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+      const absentPercent = totalCount > 0 ? Math.round((absentCount / totalCount) * 100) : 0;
+      row.push(`${presentPercent}%`, `${absentPercent}%`);
+      return row;
+    });
+
+    const csv = [header, ...rows].map(row => row.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    saveAs(blob, filename);
+  };
+
+  const handleDownloadMonth = () => {
+    const year = selectedMonth.getFullYear();
+    const month = selectedMonth.getMonth();
+    const monthRecords = attendanceData.filter(record => {
+      const recordDate = new Date(record.date);
+      return recordDate.getFullYear() === year && recordDate.getMonth() === month;
+    });
+    downloadCSV(monthRecords, `attendance_${year}_${month + 1}.csv`);
+  };
+
+  const [customRange, setCustomRange] = useState<{from: string, to: string}>({from: '', to: ''});
+  const handleDownloadCustom = () => {
+    if (!customRange.from || !customRange.to) return;
+    const fromDate = new Date(customRange.from);
+    const toDate = new Date(customRange.to);
+    const customRecords = attendanceData.filter(record => {
+      const recordDate = new Date(record.date);
+      return recordDate >= fromDate && recordDate <= toDate;
+    });
+    downloadCSV(customRecords, `attendance_${customRange.from}_to_${customRange.to}.csv`);
+  };
+
+  const handleDownloadExcel = () => {
+    if (!attendanceData.length) return;
+    // Get unique dates in the selected month
+    const year = selectedMonth.getFullYear();
+    const month = selectedMonth.getMonth();
+    const monthRecords = attendanceData.filter(record => {
+      const recordDate = new Date(record.date);
+      return recordDate.getFullYear() === year && recordDate.getMonth() === month;
+    });
+    const dates = Array.from(new Set(monthRecords.map(r => r.date))).sort();
+    const subjects = Array.from(new Set(monthRecords.map(r => r.subject).filter(Boolean)));
+
+    // Build table: first columns are Name, Roll No, Subject, then one column per date
+    const header = ['Name', 'Roll No', 'Subject', ...dates, 'Status', 'Location'];
+    const rows: any[] = [];
+    subjects.forEach(subject => {
+      const row: any = {};
+      row['Name'] = user?.name || '';
+      row['Roll No'] = user?.employeeId || '';
+      row['Subject'] = subject;
+      dates.forEach(date => {
+        const rec = monthRecords.find(r => r.subject === subject && r.date === date);
+        row[date] = rec ? rec.status : '';
+      });
+      row['Status'] = '';
+      row['Location'] = 'Classroom';
+      rows.push(row);
+    });
+    // Add overall percentage row for each subject
+    subjects.forEach(subject => {
+      const subjectRecords = monthRecords.filter(r => r.subject === subject);
+      const presentCount = subjectRecords.filter(r => r.status === 'present').length;
+      const total = subjectRecords.length;
+      const percent = total > 0 ? Math.round((presentCount / total) * 100) : 0;
+      const row: any = {};
+      row['Name'] = user?.name || '';
+      row['Roll No'] = user?.employeeId || '';
+      row['Subject'] = `${subject} %`;
+      dates.forEach(date => {
+        row[date] = '';
+      });
+      row[dates[0]] = `Overall: ${percent}%`;
+      row['Status'] = '';
+      row['Location'] = 'Classroom';
+      rows.push(row);
+    });
+    const ws = XLSX.utils.json_to_sheet(rows, { header });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+    XLSX.writeFile(wb, `attendance_${user?.employeeId || 'student'}_${year}_${month + 1}.xlsx`);
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -130,29 +318,45 @@ const MyAttendance: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">My Attendance</h1>
           <p className="text-gray-600">Track your daily attendance and working hours</p>
         </div>
-        <div className="flex items-center space-x-2">
-          <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1">
-            <button
-              onClick={() => setViewType('calendar')}
-              className={`px-2 py-1 rounded-md text-sm font-medium transition-colors ${
-                viewType === 'calendar' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
-              }`}
-            >
-              Calendar
-            </button>
-            <button
-              onClick={() => setViewType('list')}
-              className={`px-2 py-1 rounded-md text-sm font-medium transition-colors ${
-                viewType === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
-              }`}
-            >
-              List
-            </button>
+        <div className="flex items-center space-x-2 relative w-full justify-end">
+          {/* Subject filter dropdown always visible */}
+          <div style={{ minWidth: 220, background: '#f3f4f6', border: '2px solid #6366f1', borderRadius: 8, padding: '8px 16px', marginRight: 24, boxShadow: '0 2px 8px #e0e7ef' }}>
+            <label className="text-sm font-semibold text-gray-700 mr-2">Export Subject:</label>
+            <select value={exportSubject} onChange={e => setExportSubject(e.target.value)} className="border rounded px-2 py-1 text-sm">
+              <option value="">All</option>
+              {FIXED_SUBJECTS.map(subj => <option key={subj} value={subj}>{subj}</option>)}
+            </select>
           </div>
-          <button className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-            <Download className="w-4 h-4" />
-            <span>Export</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1 bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => setViewType('calendar')}
+                className={`px-2 py-1 rounded-md text-sm font-medium transition-colors ${
+                  viewType === 'calendar' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
+                }`}
+              >
+                Calendar
+              </button>
+              <button
+                onClick={() => setViewType('list')}
+                className={`px-2 py-1 rounded-md text-sm font-medium transition-colors ${
+                  viewType === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
+                }`}
+              >
+                List
+              </button>
+            </div>
+            <button onClick={handleDownloadMonth} className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <Download className="w-4 h-4" />
+              <span>Export Month</span>
+            </button>
+            <div className="flex items-center space-x-1">
+              <input type="date" value={customRange.from} onChange={e => setCustomRange(r => ({...r, from: e.target.value}))} className="border rounded px-1 text-xs" />
+              <span>-</span>
+              <input type="date" value={customRange.to} onChange={e => setCustomRange(r => ({...r, to: e.target.value}))} className="border rounded px-1 text-xs" />
+              <button onClick={handleDownloadCustom} className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs">Export Custom</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -164,7 +368,7 @@ const MyAttendance: React.FC = () => {
       ) : (
         <>
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-2">
         <div className="bg-white p-2 rounded-lg border border-gray-200">
           <div className="flex items-center justify-between">
             <div>
@@ -186,39 +390,12 @@ const MyAttendance: React.FC = () => {
         <div className="bg-white p-2 rounded-lg border border-gray-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600">Late Days</p>
-              <p className="text-2xl font-bold text-amber-600">{monthStats.lateDays}</p>
-            </div>
-            <Clock className="w-8 h-8 text-amber-600" />
-          </div>
-        </div>
-        <div className="bg-white p-2 rounded-lg border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
               <p className="text-sm text-gray-600">Attendance %</p>
               <p className="text-2xl font-bold text-purple-600">
-                {Math.round((monthStats.presentDays / monthStats.totalDays) * 100)}%
+                {isNaN(monthStats.presentDays / monthStats.totalDays) ? '0%' : Math.round((monthStats.presentDays / monthStats.totalDays) * 100) + '%'}
               </p>
             </div>
             <TrendingUp className="w-8 h-8 text-purple-600" />
-          </div>
-        </div>
-        <div className="bg-white p-2 rounded-lg border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Avg. Hours</p>
-              <p className="text-2xl font-bold text-indigo-600">{monthStats.avgWorkingHours}</p>
-            </div>
-            <Clock className="w-8 h-8 text-indigo-600" />
-          </div>
-        </div>
-        <div className="bg-white p-2 rounded-lg border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Overtime</p>
-              <p className="text-2xl font-bold text-orange-600">{monthStats.totalOvertime}</p>
-            </div>
-            <TrendingUp className="w-8 h-8 text-orange-600" />
           </div>
         </div>
       </div>
@@ -257,22 +434,22 @@ const MyAttendance: React.FC = () => {
                 {calendarDays.map((day, index) => (
                   <div
                     key={index}
-                    className={`p-1 min-h-[60px] border border-gray-100 rounded-lg ${
-                      !day.isCurrentMonth ? 'bg-gray-50' : 'bg-white'
-                    } ${day.isToday ? 'ring-2 ring-blue-500' : ''}`}
+                    className={`p-1 min-h-[60px] border border-gray-100 rounded-lg transition-colors duration-200
+                      ${!day.isCurrentMonth ? 'bg-gray-50' : day.attendance ? getStatusColor(day.attendance.status).split(' ')[0] : 'bg-white'}
+                      ${day.isToday ? 'ring-2 ring-blue-500' : ''}`}
                   >
-                    <div className={`text-sm font-medium mb-1 ${
-                      !day.isCurrentMonth ? 'text-gray-400' : 'text-gray-900'
-                    }`}>
+                    <div className={`text-sm font-medium mb-1 ${!day.isCurrentMonth ? 'text-gray-400' : 'text-gray-900'}`}>
                       {day.date.getDate()}
                     </div>
-                    
                     {day.attendance && day.isCurrentMonth && (
                       <div className="space-y-1">
-                        <div className={`text-xs px-1 py-0.5 rounded-full text-center ${getStatusColor(day.attendance.status)}`}>
+                        <div className={`text-xs px-1 py-0.5 rounded-full text-center ${getStatusColor(day.attendance.status)}`}> 
                           {day.attendance.status.charAt(0).toUpperCase() + day.attendance.status.slice(1)}
                         </div>
-                        {day.attendance.status === 'present' || day.attendance.status === 'late' ? (
+                        {day.attendance.subject && (
+                          <div className="text-xs text-blue-700 text-center font-semibold">{day.attendance.subject}</div>
+                        )}
+                        {(day.attendance.status === 'present' || day.attendance.status === 'late') ? (
                           <div className="text-xs text-gray-600 text-center">
                             {day.attendance.clockIn} - {day.attendance.clockOut}
                           </div>
@@ -309,6 +486,7 @@ const MyAttendance: React.FC = () => {
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clock In</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clock Out</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Working Hours</th>
@@ -317,7 +495,14 @@ const MyAttendance: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {attendanceData.slice(0, 10).map((record, index) => (
+                    {subjects.length > 0 && (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                          <strong>Subject: {selectedSubject || 'All'}</strong>
+                        </td>
+                      </tr>
+                    )}
+                    {(selectedSubject ? attendanceData.filter(r => r.subject === selectedSubject) : attendanceData).slice(0, 10).map((record, index) => (
                       <tr key={index} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm font-medium text-gray-900">
@@ -327,6 +512,9 @@ const MyAttendance: React.FC = () => {
                               day: 'numeric' 
                             })}
                           </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {record.subject || '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {record.clockIn}
@@ -361,38 +549,7 @@ const MyAttendance: React.FC = () => {
         </div>
 
         {/* Today's Status - Sidebar */}
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-2 border border-blue-200">
-          <h3 className="text-lg font-semibold text-blue-900 mb-2">Today's Status</h3>
-          <div className="space-y-2">
-            <div className="bg-white p-2 rounded-lg">
-              <div className="flex items-center space-x-2">
-                <Clock className="w-6 h-6 text-green-600" />
-                <div>
-                  <p className="text-sm text-gray-600">Clock In</p>
-                  <p className="text-lg font-bold text-gray-900">9:15 AM</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white p-2 rounded-lg">
-              <div className="flex items-center space-x-2">
-                <TrendingUp className="w-6 h-6 text-blue-600" />
-                <div>
-                  <p className="text-sm text-gray-600">Hours Worked</p>
-                  <p className="text-lg font-bold text-gray-900">5h 45m</p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white p-2 rounded-lg">
-              <div className="flex items-center space-x-2">
-                <MapPin className="w-6 h-6 text-purple-600" />
-                <div>
-                  <p className="text-sm text-gray-600">Location</p>
-                  <p className="text-lg font-bold text-gray-900">Block A</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Removed the sidebar with today's status */}
       </div>
         </>
       )}

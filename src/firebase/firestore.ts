@@ -371,12 +371,14 @@ export const leaveService = {
 export const attendanceService = {
   // Mark attendance
   async markAttendance(attendanceData: Omit<AttendanceLog, 'id'>): Promise<string> {
-    const attendanceRef = collection(db, COLLECTIONS.ATTENDANCE);
-    const docRef = await addDoc(attendanceRef, {
+    const attendanceRef = doc(collection(db, COLLECTIONS.ATTENDANCE));
+    await setDoc(attendanceRef, {
       ...attendanceData,
+      subject: attendanceData.subject || null, // Save subject if present
+      id: attendanceRef.id,
       createdAt: serverTimestamp()
     });
-    return docRef.id;
+    return attendanceRef.id;
   },
 
   // Get attendance by user and date range
@@ -418,14 +420,11 @@ export const attendanceService = {
       where('userId', '==', userId)
     );
     const querySnapshot = await getDocs(q);
-    
-    // Sort in memory to avoid composite index requirement
     const records = querySnapshot.docs.map(doc => ({
       id: doc.id,
-      ...doc.data()
+      ...doc.data(),
+      subject: doc.data().subject || null // Ensure subject is present
     })) as AttendanceLog[];
-    
-    // Sort by date descending (most recent first)
     return records.sort((a, b) => {
       const aDate = a.date instanceof Date ? a.date : 
                    (a.date as any)?.toDate?.() || new Date(a.date || 0);

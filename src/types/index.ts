@@ -49,8 +49,13 @@ export interface AttendanceRecord {
   date: string;
   clockIn: string;
   clockOut?: string;
-  status: 'present' | 'absent' | 'late' | 'leave';
-  workingHours?: number;
+  status: 'present' | 'absent' | 'late' | 'leave' | 'half-day';
+  workingHours?: string;
+  overtime?: string;
+  location?: string;
+  subject?: string;
+  notes?: string;
+  createdAt?: any;
 }
 
 export interface AttendanceLog {
@@ -64,6 +69,7 @@ export interface AttendanceLog {
   workingHours?: number;
   location?: string;
   notes?: string;
+  subject?: string; // Added for subject-wise attendance
   createdAt?: any; // Firestore timestamp
 }
 
