@@ -89,6 +89,149 @@ export const userService = {
   async deleteUser(userId: string): Promise<void> {
     const userRef = doc(db, COLLECTIONS.USERS, userId);
     await deleteDoc(userRef);
+  },
+
+  // Get students by year, semester, and division
+  async getStudentsByYearSemDiv(year: string, sem: string, div: string): Promise<User[]> {
+    const usersRef = collection(db, COLLECTIONS.USERS);
+    const q = query(
+      usersRef, 
+      where('role', '==', 'student'),
+      where('year', '==', year),
+      where('sem', '==', sem),
+      where('div', '==', div),
+      orderBy('name')
+    );
+    const querySnapshot = await getDocs(q);
+    
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as User[];
+  },
+
+  // Get all students
+  async getAllStudents(): Promise<User[]> {
+    const usersRef = collection(db, COLLECTIONS.USERS);
+    const q = query(usersRef, where('role', '==', 'student'), orderBy('name'));
+    const querySnapshot = await getDocs(q);
+    
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as User[];
+  },
+
+  // Check if student exists by email
+  async checkStudentExists(email: string): Promise<boolean> {
+    const usersRef = collection(db, COLLECTIONS.USERS);
+    const q = query(usersRef, where('email', '==', email), where('role', '==', 'student'));
+    const querySnapshot = await getDocs(q);
+    return !querySnapshot.empty;
+  },
+
+  // Check if student exists by roll number
+  async checkStudentExistsByRollNumber(rollNumber: string): Promise<boolean> {
+    const usersRef = collection(db, COLLECTIONS.USERS);
+    const q = query(usersRef, where('rollNumber', '==', rollNumber), where('role', '==', 'student'));
+    const querySnapshot = await getDocs(q);
+    return !querySnapshot.empty;
+  },
+
+  // Bulk import students
+  async bulkImportStudents(students: User[]): Promise<void> {
+    const batch = writeBatch(db);
+    
+    for (const student of students) {
+      const userRef = doc(db, COLLECTIONS.USERS, student.id);
+      batch.set(userRef, {
+        ...student,
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp()
+      });
+    }
+    
+    await batch.commit();
+  },
+
+  // Create organized student collections by year, semester, division
+  async createOrganizedStudentCollection(student: User): Promise<void> {
+    if (!student.year || !student.sem || !student.div || !student.rollNumber) {
+      throw new Error('Missing year, sem, div, or rollNumber for organized collection path');
+    }
+    if (student.rollNumber.includes('/')) {
+      throw new Error('rollNumber cannot contain slashes');
+    }
+    const collectionPath = `students/${student.year}/sems/${student.sem}/divs/${student.div}/students`;
+    const studentRef = doc(db, collectionPath, student.rollNumber);
+    await setDoc(studentRef, {
+      ...student,
+      updatedAt: serverTimestamp(),
+      createdAt: serverTimestamp()
+    });
+  },
+
+  // Get students from organized collection
+  async getStudentsFromOrganizedCollection(year: string, sem: string, div: string): Promise<User[]> {
+    const collectionPath = `students/${year}/sems/${sem}/divs/${div}/students`;
+    const studentsRef = collection(db, collectionPath);
+    const querySnapshot = await getDocs(studentsRef);
+    return querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as User[];
+  },
+
+  // Get all students from organized collections
+  async getAllStudentsFromOrganizedCollections(): Promise<User[]> {
+    const allStudents: User[] = [];
+    
+    // Get all years
+    const yearsRef = collection(db, 'students');
+    const yearsSnapshot = await getDocs(yearsRef);
+    
+    for (const yearDoc of yearsSnapshot.docs) {
+      const year = yearDoc.id;
+      
+      // Get all semesters for this year
+      const semsRef = collection(db, `students/${year}`);
+      const semsSnapshot = await getDocs(semsRef);
+      
+      for (const semDoc of semsSnapshot.docs) {
+        const sem = semDoc.id;
+        
+        // Get all divisions for this semester
+        const divsRef = collection(db, `students/${year}/${sem}`);
+        const divsSnapshot = await getDocs(divsRef);
+        
+        for (const divDoc of divsSnapshot.docs) {
+          const div = divDoc.id;
+          
+          // Get all students for this division
+          const students = await this.getStudentsFromOrganizedCollection(year, sem, div);
+          allStudents.push(...students);
+        }
+      }
+    }
+    
+    return allStudents;
+  },
+
+  // Update organized student collection
+  async updateOrganizedStudentCollection(student: User): Promise<void> {
+    const collectionPath = `students/${student.year}/sems/${student.sem}/divs/${student.div}/students`;
+    const studentRef = doc(db, collectionPath, student.rollNumber || student.id);
+    await setDoc(studentRef, {
+      ...student,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  },
+
+  // Delete organized student collection
+  async deleteOrganizedStudentCollection(student: User): Promise<void> {
+    const collectionPath = `students/${student.year}/sems/${student.sem}/divs/${student.div}/students`;
+    const studentRef = doc(db, collectionPath, student.rollNumber || student.id);
+    await deleteDoc(studentRef);
   }
 };
 

@@ -161,51 +161,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password?: string) => {
     setIsLoading(true);
     try {
-      // If password is provided, try Firebase Authentication (for demo fallback or legacy accounts)
-      if (password) {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        // User data will be handled by the auth state listener
+      // First check if the user exists in our database
+      const existingUser = await userService.getUser(email);
+      
+      if (!existingUser) {
+        // Check if it's a demo user
+        const foundUser = mockUsers.find(u => u.email === email);
+        if (foundUser) {
+          // Save user data to Firestore
+          try {
+            console.log('[AuthContext] Demo user login:', foundUser.email);
+            
+            // Check if user already exists in Firestore
+            const existingDemoUser = await userService.getUser(foundUser.id);
+            
+            if (existingDemoUser) {
+              console.log('[AuthContext] Updating existing user:', foundUser.id);
+              // Update existing user with new login info
+              await userService.updateUser(foundUser.id, {
+                lastLogin: new Date().toISOString(),
+                loginCount: (existingDemoUser.loginCount || 0) + 1
+              });
+            } else {
+              console.log('[AuthContext] Creating new user in Firestore:', foundUser.id);
+              // Create new user in Firestore
+              await userService.createUser({
+                ...foundUser,
+                lastLogin: new Date().toISOString(),
+                loginCount: 1,
+                createdAt: new Date().toISOString()
+              });
+            }
+            console.log('[AuthContext] User data saved to Firestore successfully');
+          } catch (error) {
+            console.error('Error saving user data to Firestore:', error);
+            // Continue with login even if Firestore save fails
+          }
+          setUser(foundUser);
+          localStorage.setItem('dypsn_user', JSON.stringify(foundUser));
+        } else {
+          throw new Error('User not found in database. Please contact administrator.');
+        }
       } else {
-        throw new Error('Passwordless sign-in requires email link. Use sendEmailLink.');
+        // User exists in database, proceed with authentication
+        if (password) {
+          const userCredential = await signInWithEmailAndPassword(auth, email, password);
+          // User data will be handled by the auth state listener
+        } else {
+          throw new Error('Passwordless sign-in requires email link. Use sendEmailLink.');
+        }
       }
     } catch (firebaseError: any) {
-      // If Firebase auth fails, try demo accounts
-      const foundUser = mockUsers.find(u => u.email === email);
-      if (foundUser) {
-        // Save user data to Firestore
-        try {
-          console.log('[AuthContext] Demo user login:', foundUser.email);
-          
-          // Check if user already exists in Firestore
-          const existingUser = await userService.getUser(foundUser.id);
-          
-          if (existingUser) {
-            console.log('[AuthContext] Updating existing user:', foundUser.id);
-            // Update existing user with new login info
-            await userService.updateUser(foundUser.id, {
-              lastLogin: new Date().toISOString(),
-              loginCount: (existingUser.loginCount || 0) + 1
-            });
-          } else {
-            console.log('[AuthContext] Creating new user in Firestore:', foundUser.id);
-            // Create new user in Firestore
-            await userService.createUser({
-              ...foundUser,
-              lastLogin: new Date().toISOString(),
-              loginCount: 1,
-              createdAt: new Date().toISOString()
-            });
-          }
-          console.log('[AuthContext] User data saved to Firestore successfully');
-        } catch (error) {
-          console.error('Error saving user data to Firestore:', error);
-          // Continue with login even if Firestore save fails
-        }
-        setUser(foundUser);
-        localStorage.setItem('dypsn_user', JSON.stringify(foundUser));
-      } else {
-        throw new Error('Invalid credentials');
-      }
+      console.error('Login error:', firebaseError);
+      throw new Error(firebaseError.message || 'Login failed');
     } finally {
       setIsLoading(false);
     }

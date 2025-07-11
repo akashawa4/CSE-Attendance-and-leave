@@ -7,16 +7,17 @@ import { LeaveRequest } from '../../types';
 interface ActivityDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
+  activities: any[];
 }
 
-const ActivityDetailModal: React.FC<ActivityDetailModalProps> = ({ isOpen, onClose }) => {
+const ActivityDetailModal: React.FC<ActivityDetailModalProps> = ({ isOpen, onClose, activities }) => {
   const [filterType, setFilterType] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
 
   if (!isOpen) return null;
 
-  // This would be populated with real activity data from Firestore
-  const allActivities: any[] = [];
+  // Use the passed-in activities
+  const allActivities: any[] = activities;
 
   const filteredActivities = allActivities.filter(activity => {
     const matchesFilter = filterType === 'all' || activity.type.includes(filterType);
@@ -224,7 +225,7 @@ const RecentActivity: React.FC = () => {
         {user?.accessLevel !== 'full' && (
           <div className="mt-4 p-3 bg-blue-50 rounded-lg">
             <p className="text-xs text-blue-800">
-              <strong>Approval Flow:</strong> All requests follow: HOD → Principal → Registrar → HR Executive
+              <strong>Approval Flow:</strong> All requests follow: Teacher → HOD
             </p>
           </div>
         )}
@@ -233,6 +234,7 @@ const RecentActivity: React.FC = () => {
       <ActivityDetailModal 
         isOpen={showModal}
         onClose={() => setShowModal(false)}
+        activities={recentActivities}
       />
     </>
   );

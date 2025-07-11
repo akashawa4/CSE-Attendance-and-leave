@@ -203,7 +203,11 @@ const MyLeaves: React.FC = () => {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredLeaves.map((leave) => (
-                <tr key={leave.id} className="hover:bg-gray-50">
+                <tr
+                  key={leave.id}
+                  className="hover:bg-blue-50 cursor-pointer"
+                  onClick={() => setSelectedLeave(leave)}
+                >
                   <td className="px-6 py-4">
                     <div>
                       <div className="flex items-center space-x-2">
@@ -248,7 +252,7 @@ const MyLeaves: React.FC = () => {
                       )}
                     </div>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-6 py-4" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center space-x-2">
                       <button
                         onClick={() => setSelectedLeave(leave)}

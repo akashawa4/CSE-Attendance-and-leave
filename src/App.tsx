@@ -10,6 +10,8 @@ import MyLeaves from './components/Leave/MyLeaves';
 import MyAttendance from './components/Attendance/MyAttendance';
 import ESLBiometricIntegration from './components/Attendance/ESLBiometricIntegration';
 import Notifications from './components/Notifications/Notifications';
+import StudentManagementPanel from './components/StudentManagement/StudentManagementPanel';
+import TeacherStudentPanel from './components/StudentManagement/TeacherStudentPanel';
 import { Upload, BarChart3, Users, Calendar, FileText } from 'lucide-react';
 import StudentProfile from './components/StudentProfile';
 
@@ -361,6 +363,12 @@ const AppContent: React.FC = () => {
         );
       case 'users':
         return <UserManagementPage />;
+      case 'student-management':
+        return user?.role === 'teacher' ? (
+          <TeacherStudentPanel user={user} />
+        ) : (
+          <StudentManagementPanel user={user} />
+        );
       case 'settings':
         return (
           <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">

@@ -1,9 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import DashboardStats from './DashboardStats';
 import RecentActivity from './RecentActivity';
 import { useAuth } from '../../contexts/AuthContext';
 import { Calendar, Users, TrendingUp, Clock } from 'lucide-react';
 import LeaveApprovalPanel from '../Leave/LeaveApprovalPanel';
+import TakeAttendancePanel from '../Attendance/TakeAttendancePanel';
+import StudentManagementPanel from '../StudentManagement/StudentManagementPanel';
+import TeacherStudentPanel from '../StudentManagement/TeacherStudentPanel';
 
 interface DashboardProps {
   onPageChange?: (page: string) => void;
@@ -11,6 +14,7 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ onPageChange }) => {
   const { user } = useAuth();
+  const [showStudentManagement, setShowStudentManagement] = useState(false);
 
   return (
     <div className="space-y-6">
@@ -47,13 +51,49 @@ const Dashboard: React.FC<DashboardProps> = ({ onPageChange }) => {
         </div>
       )}
 
+      {(user?.role === 'teacher' || user?.role === 'hod') && (
+        <>
+          <TakeAttendancePanel />
+          <div className="flex justify-end mb-4">
+            <button
+              onClick={() => setShowStudentManagement(!showStudentManagement)}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition flex items-center gap-2"
+            >
+              <Users size={16} />
+              {showStudentManagement ? 'Hide Student Management' : 'Student Management'}
+            </button>
+          </div>
+          {showStudentManagement && (
+            user?.role === 'teacher'
+              ? <TeacherStudentPanel user={user} />
+              : <StudentManagementPanel user={user} />
+          )}
+        </>
+      )}
+
       <DashboardStats />
 
-      {user?.accessLevel === 'full' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <LeaveApprovalPanel />
-          <RecentActivity />
-        </div>
+      {(user?.accessLevel === 'full' || user?.role === 'hod') ? (
+        <>
+          <div className="flex justify-end mb-4">
+            <button
+              onClick={() => setShowStudentManagement(!showStudentManagement)}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition flex items-center gap-2"
+            >
+              <Users size={16} />
+              {showStudentManagement ? 'Hide Student Management' : 'Student Management'}
+            </button>
+          </div>
+          
+          {showStudentManagement && (
+            <StudentManagementPanel user={user} />
+          )}
+          
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <LeaveApprovalPanel />
+            <RecentActivity />
+          </div>
+        </>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <RecentActivity />

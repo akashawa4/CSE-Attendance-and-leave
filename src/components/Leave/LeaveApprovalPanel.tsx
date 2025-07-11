@@ -87,10 +87,10 @@ const ApprovalModal: React.FC<ApprovalModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium text-gray-500">Employee Details</label>
+                <label className="text-sm font-medium text-gray-500">Student Details</label>
                 <div className="mt-1">
                   <p className="text-lg font-semibold text-gray-900">{request.userName}</p>
-                  <p className="text-sm text-gray-600">Employee</p>
+                  <p className="text-sm text-gray-600">Student</p>
                   <p className="text-sm text-gray-600">{request.department}</p>
                   <p className="text-sm text-gray-600">ID: {request.userId}</p>
                 </div>
@@ -551,7 +551,7 @@ const LeaveApprovalPanel: React.FC = () => {
                     <div>
                       <div className="flex items-center space-x-2">
                         <span className="font-medium text-gray-900">{getLeaveTypeName(request.leaveType)}</span>
-                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">{request.id}</span>
+                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">{request.userName}</span>
                       </div>
                       <p className="text-sm text-gray-600 mt-1 line-clamp-2">{request.reason}</p>
                       <p className="text-xs text-gray-400 mt-1">

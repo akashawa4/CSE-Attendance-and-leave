@@ -38,14 +38,15 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, currentPage, onPageC
     const teacherItems = [
       ...studentItems,
       { id: 'leave-requests', label: 'Leave Approval Panel', icon: CheckCircle },
+      { id: 'student-management', label: 'Student Management', icon: Users },
     ];
 
-    const hodItems = [
+    const adminItems = [
       ...teacherItems,
-      // HOD could have additional items if needed
+      // Admin has all teacher items plus additional admin features
     ];
 
-    if (user?.role === 'hod') return hodItems;
+    if (user?.accessLevel === 'full' || user?.role === 'hod') return adminItems;
     if (user?.role === 'teacher') return teacherItems;
     return studentItems;
   };

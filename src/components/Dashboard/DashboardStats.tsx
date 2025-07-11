@@ -44,7 +44,6 @@ const DashboardStats: React.FC = () => {
   useEffect(() => {
     const loadLeaveRequests = async () => {
       if (!user) return;
-      
       try {
         setLoading(true);
         const requests = await leaveService.getLeaveRequestsByUser(user.id);
@@ -55,20 +54,18 @@ const DashboardStats: React.FC = () => {
         setLoading(false);
       }
     };
-
     loadLeaveRequests();
   }, [user]);
 
   // Calculate stats from real data
   const calculateStats = () => {
     if (!user) return [];
-
     const pendingRequests = leaveRequests.filter(req => req.status === 'pending').length;
     const approvedRequests = leaveRequests.filter(req => req.status === 'approved').length;
     const totalRequests = leaveRequests.length;
 
     if (user.accessLevel === 'full') {
-      // Admin stats
+      // Admin stats (unchanged)
       return [
         {
           id: 'staff',
@@ -107,46 +104,80 @@ const DashboardStats: React.FC = () => {
           color: 'purple'
         }
       ];
-    } else {
+    } else if (user.role === 'teacher') {
       // Teacher stats
       return [
-    {
-      id: 'attendance',
-      title: 'This Month Attendance',
-      value: '22/24',
-      change: '+2.5%',
-      changeType: 'positive' as const,
-      icon: Clock,
-      color: 'blue'
-    },
-    {
-      id: 'balance',
-      title: 'Leave Balance',
-      value: '8 days',
-      change: 'CL: 3, EL: 5',
-      changeType: 'neutral' as const,
-      icon: FileText,
-      color: 'green'
-    },
-    {
-      id: 'pending',
-      title: 'Pending Requests',
+        {
+          id: 'attendance',
+          title: 'This Month Attendance',
+          value: '22/24',
+          change: '+2.5%',
+          changeType: 'positive' as const,
+          icon: Clock,
+          color: 'blue'
+        },
+        {
+          id: 'balance',
+          title: 'Leave Balance',
+          value: '8 days',
+          change: 'CL: 3, EL: 5',
+          changeType: 'neutral' as const,
+          icon: FileText,
+          color: 'green'
+        },
+        {
+          id: 'pending',
+          title: 'Pending Requests',
           value: pendingRequests.toString(),
-      change: 'Awaiting approval',
-      changeType: 'warning' as const,
-      icon: AlertCircle,
-      color: 'amber'
-    },
-    {
-      id: 'approved',
-      title: 'Approved Leaves',
+          change: 'Awaiting approval',
+          changeType: 'warning' as const,
+          icon: AlertCircle,
+          color: 'amber'
+        },
+        {
+          id: 'approved',
+          title: 'Approved Leaves',
           value: approvedRequests.toString(),
-      change: 'This month',
-      changeType: 'positive' as const,
-      icon: CheckCircle,
-      color: 'green'
-    }
-  ];
+          change: 'This month',
+          changeType: 'positive' as const,
+          icon: CheckCircle,
+          color: 'green'
+        }
+      ];
+    } else if (user.role === 'student') {
+      // Student stats: only their own attendance and leave stats
+      return [
+        {
+          id: 'attendance',
+          title: 'Present Days',
+          value: '0', // You can fetch real attendance data if available
+          change: '',
+          changeType: 'neutral' as const,
+          icon: CheckCircle,
+          color: 'green'
+        },
+        {
+          id: 'leaves',
+          title: 'Leave Requests',
+          value: totalRequests.toString(),
+          change: `${approvedRequests} approved`,
+          changeType: 'neutral' as const,
+          icon: FileText,
+          color: 'blue'
+        },
+        {
+          id: 'pending',
+          title: 'Pending Requests',
+          value: pendingRequests.toString(),
+          change: '',
+          changeType: 'warning' as const,
+          icon: AlertCircle,
+          color: 'amber'
+        }
+      ];
+    } else {
+      // Default fallback
+      return [];
     }
   };
 
@@ -348,10 +379,9 @@ const DashboardStats: React.FC = () => {
             <div className="bg-gray-50 p-4 rounded-lg">
               <h4 className="font-medium text-gray-900 mb-2">Approval Flow Information</h4>
               <div className="text-sm text-gray-600 space-y-1">
-                <p>• <strong>Step 1:</strong> HOD Approval (Department Level)</p>
-                <p>• <strong>Step 2:</strong> Principal Approval (Academic Level)</p>
-                <p>• <strong>Step 3:</strong> Registrar Approval (Administrative Level)</p>
-                <p>• <strong>Step 4:</strong> HR Executive Final Approval (HR Level)</p>
+                <p>• <strong>Step 1:</strong>Teacher(Department Level)</p>
+                <p>• <strong>Step 2:</strong>  HOD(Academic Level)</p>
+
               </div>
               <div className="flex space-x-2 mt-3">
                 <button className="px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
