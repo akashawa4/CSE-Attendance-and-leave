@@ -333,7 +333,11 @@ const AppContent: React.FC = () => {
         return <LeaveRequestForm />;
       case 'my-leaves':
         return <MyLeaves />;
+      case 'student-leaves':
+        return <MyLeaves />;
       case 'my-attendance':
+        return <MyAttendance />;
+      case 'student-attendance':
         return <MyAttendance />;
       case 'esl-integration':
         return <ESLBiometricIntegration />;

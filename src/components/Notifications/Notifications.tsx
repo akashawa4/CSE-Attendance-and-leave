@@ -12,6 +12,8 @@ const Notifications: React.FC = () => {
   const [selectedNotifications, setSelectedNotifications] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [banner, setBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [confirm, setConfirm] = useState<null | { action: 'archive' | 'delete'; message: string }> (null);
 
   // Load user's notifications from Firestore
   useEffect(() => {
@@ -102,8 +104,114 @@ const Notifications: React.FC = () => {
     }
   };
 
+  // Handler: Mark as Read
+  const handleMarkAsRead = async () => {
+    try {
+      await Promise.all(selectedNotifications.map(id =>
+        notificationService.markNotificationAsRead(id)
+      ));
+      setNotifications(prev => prev.map(n =>
+        selectedNotifications.includes(n.id) ? { ...n, read: true } : n
+      ));
+      setSelectedNotifications([]);
+    } catch (error) {
+      alert('Failed to mark as read.');
+    }
+  };
+
+  // Handler: Archive
+  const handleArchive = async () => {
+    setConfirm({ action: 'archive', message: 'Are you sure you want to archive the selected notifications?' });
+  };
+
+  // Handler: Delete
+  const handleDelete = async () => {
+    setConfirm({ action: 'delete', message: 'Are you sure you want to delete the selected notifications? This action cannot be undone.' });
+  };
+
+  // Confirmed action
+  const handleConfirm = async () => {
+    if (!confirm) return;
+    if (confirm.action === 'archive') {
+      try {
+        await Promise.all(selectedNotifications.map(id =>
+          notificationService.archiveNotification(id)
+        ));
+        setNotifications(prev => prev.map(n =>
+          selectedNotifications.includes(n.id) ? { ...n, archived: true } : n
+        ));
+        setSelectedNotifications([]);
+        setBanner({ type: 'success', message: 'Notifications archived successfully.' });
+        setTimeout(() => setBanner(null), 3000);
+      } catch (error) {
+        setBanner({ type: 'error', message: 'Failed to archive notifications.' });
+        setTimeout(() => setBanner(null), 3000);
+      }
+    } else if (confirm.action === 'delete') {
+      try {
+        await Promise.all(selectedNotifications.map(id =>
+          notificationService.deleteNotification(id)
+        ));
+        setNotifications(prev => prev.filter(n => !selectedNotifications.includes(n.id)));
+        setSelectedNotifications([]);
+        setBanner({ type: 'success', message: 'Notifications deleted successfully.' });
+        setTimeout(() => setBanner(null), 3000);
+      } catch (error) {
+        setBanner({ type: 'error', message: 'Failed to delete notifications.' });
+        setTimeout(() => setBanner(null), 3000);
+      }
+    }
+    setConfirm(null);
+  };
+
   return (
     <div className="space-y-4">
+      {/* Animated banner for success/error */}
+      {banner && (
+        <div
+          className={`fixed z-50 px-4 py-3 rounded-lg shadow-lg text-white font-semibold transition-all duration-500 ease-in-out
+            ${banner.type === 'success' ? 'bg-green-600 animate-slide-down-fade' : ''}
+            ${banner.type === 'error' ? 'bg-red-600 animate-slide-down-fade' : ''}
+          `}
+          style={{
+            top: 0,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 'fit-content',
+            maxWidth: '95vw',
+            fontSize: '1rem',
+            padding: '0.75rem 1rem',
+            margin: '0 auto',
+            textAlign: 'center',
+            zIndex: 9999,
+          }}
+        >
+          {banner.message}
+        </div>
+      )}
+
+      {/* Custom confirmation modal */}
+      {confirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-xs w-full mx-2 text-center animate-slide-down-fade">
+            <div className="mb-4 text-gray-900 text-base font-semibold">{confirm.message}</div>
+            <div className="flex justify-center gap-3 mt-4">
+              <button
+                onClick={() => setConfirm(null)}
+                className="flex-1 py-2 rounded-lg bg-gray-200 text-gray-700 font-medium hover:bg-gray-300"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirm}
+                className={`flex-1 py-2 rounded-lg text-white font-medium ${confirm.action === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+              >
+                Yes, {confirm.action === 'delete' ? 'Delete' : 'Archive'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
@@ -213,13 +321,13 @@ const Notifications: React.FC = () => {
               {selectedNotifications.length} notification{selectedNotifications.length > 1 ? 's' : ''} selected
             </span>
             <div className="flex items-center space-x-2">
-              <button className="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+              <button onClick={handleMarkAsRead} className="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
                 Mark as Read
               </button>
-              <button className="px-3 py-1 bg-gray-600 text-white text-sm rounded-lg hover:bg-gray-700">
+              <button onClick={handleArchive} className="px-3 py-1 bg-gray-600 text-white text-sm rounded-lg hover:bg-gray-700">
                 Archive
               </button>
-              <button className="px-3 py-1 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700">
+              <button onClick={handleDelete} className="px-3 py-1 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700">
                 Delete
               </button>
             </div>

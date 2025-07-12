@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { userService } from '../../firebase/firestore';
-import { User } from '../../types';
-import { Users, Search, Filter, Download, Eye, Upload, Plus, Edit, Trash2 } from 'lucide-react';
+import { userService, attendanceService } from '../../firebase/firestore';
+import { User, AttendanceLog } from '../../types';
+import { Users, Search, Filter, Download, Eye, Upload, Plus, Edit, Trash2, Calendar, FileText, BarChart3 } from 'lucide-react';
 
 interface TeacherStudentPanelProps {
   user: User;
@@ -25,6 +25,13 @@ const TeacherStudentPanel: React.FC<TeacherStudentPanelProps> = ({ user }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportType, setExportType] = useState<'basic' | 'monthly' | 'custom' | 'subject'>('basic');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM format
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [selectedSubject, setSelectedSubject] = useState('');
+  const [exporting, setExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- Refactor to use rollNumber instead of employeeId ---
@@ -71,27 +78,29 @@ const TeacherStudentPanel: React.FC<TeacherStudentPanelProps> = ({ user }) => {
   const fetchStudents = async () => {
     setLoading(true);
     try {
-      // Try to get students from organized collection first
+      let fetchedStudents = [];
       try {
         const organizedStudents = await userService.getStudentsFromOrganizedCollection(selectedYear, selectedSem, selectedDiv);
-        const filtered = organizedStudents.filter(student => 
-          student.role === 'student' &&
-          student.department === user.department
-        );
-        setStudents(filtered);
+        fetchedStudents = organizedStudents;
       } catch (error) {
         // Fallback to regular collection if organized collection doesn't exist
         console.log('Organized collection not found, using regular collection');
         const allStudents = await userService.getAllStudents();
-        const filtered = allStudents.filter(student => 
-          student.role === 'student' &&
+        fetchedStudents = allStudents.filter(student =>
           student.department === user.department &&
           student.year === selectedYear &&
           student.sem === selectedSem &&
           student.div === selectedDiv
         );
-        setStudents(filtered);
+        // If no students match, show all students for the department
+        if (fetchedStudents.length === 0) {
+          fetchedStudents = allStudents.filter(student =>
+            student.department === user.department
+          );
+        }
       }
+      // Always filter to only students
+      setStudents(fetchedStudents.filter(s => s.role === 'student'));
     } catch (error) {
       console.error('Error fetching students:', error);
     } finally {
@@ -101,15 +110,18 @@ const TeacherStudentPanel: React.FC<TeacherStudentPanelProps> = ({ user }) => {
 
   const filterStudents = () => {
     const filtered = students.filter(student =>
+      student.role === 'student' &&
+      (
       student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       student.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (student.rollNumber && student.rollNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+      )
     );
     setFilteredStudents(filtered);
   };
 
   const exportStudents = () => {
-    const exportData = filteredStudents.map(student => ({
+    const exportData = filteredStudents.filter(s => s.role === 'student').map(student => ({
       name: student.name,
       email: student.email,
       phone: student.phone || '',
@@ -150,6 +162,171 @@ const TeacherStudentPanel: React.FC<TeacherStudentPanelProps> = ({ user }) => {
     a.click();
     document.body.removeChild(a);
     window.URL.revokeObjectURL(url);
+  };
+
+  const exportStudentsWithAttendance = async (type: 'monthly' | 'custom' | 'subject') => {
+    setExporting(true);
+    try {
+      let startDateObj: Date;
+      let endDateObj: Date;
+      let fileName: string;
+
+      switch (type) {
+        case 'monthly':
+          const [year, month] = selectedMonth.split('-');
+          startDateObj = new Date(parseInt(year), parseInt(month) - 1, 1);
+          endDateObj = new Date(parseInt(year), parseInt(month), 0);
+          fileName = `student_attendance_${selectedMonth}_${selectedYear}_${selectedSem}_${selectedDiv}.csv`;
+          break;
+        case 'custom':
+          if (!startDate || !endDate) {
+            alert('Please select both start and end dates');
+            return;
+          }
+          startDateObj = new Date(startDate);
+          endDateObj = new Date(endDate);
+          fileName = `student_attendance_${startDate}_to_${endDate}_${selectedYear}_${selectedSem}_${selectedDiv}.csv`;
+          break;
+        case 'subject':
+          if (!selectedSubject) {
+            alert('Please select a subject');
+            return;
+          }
+          startDateObj = new Date(new Date().getFullYear(), 0, 1); // Start of current year
+          endDateObj = new Date();
+          fileName = `student_attendance_${selectedSubject}_${selectedYear}_${selectedSem}_${selectedDiv}.csv`;
+          break;
+        default:
+          return;
+      }
+
+      // Get attendance data for all students
+      const attendanceData: any[] = [];
+      
+      for (const student of filteredStudents.filter(s => s.role === 'student')) {
+        try {
+          let studentAttendance: AttendanceLog[] = [];
+          
+          if (type === 'subject') {
+            // For subject-wise export, we need to filter by subject
+            const allAttendance = await attendanceService.getAttendanceByUserAndDateRange(
+              student.id,
+              startDateObj,
+              endDateObj
+            );
+            studentAttendance = allAttendance.filter(att => att.subject === selectedSubject);
+          } else {
+            studentAttendance = await attendanceService.getAttendanceByUserAndDateRange(
+              student.id,
+              startDateObj,
+              endDateObj
+            );
+          }
+
+          // Calculate attendance statistics
+          const totalDays = studentAttendance.length;
+          const presentDays = studentAttendance.filter(att => att.status === 'present').length;
+          const absentDays = studentAttendance.filter(att => att.status === 'absent').length;
+          const lateDays = studentAttendance.filter(att => att.status === 'late').length;
+          const leaveDays = studentAttendance.filter(att => att.status === 'leave').length;
+          const attendancePercentage = totalDays > 0 ? ((presentDays + lateDays) / totalDays * 100).toFixed(2) : '0';
+
+          attendanceData.push({
+            name: student.name,
+            email: student.email,
+            rollNumber: student.rollNumber || '',
+            phone: student.phone || '',
+            gender: student.gender || '',
+            year: student.year || '',
+            sem: student.sem || '',
+            div: student.div || '',
+            department: student.department || '',
+            totalDays,
+            presentDays,
+            absentDays,
+            lateDays,
+            leaveDays,
+            attendancePercentage: `${attendancePercentage}%`,
+            status: student.isActive ? 'Active' : 'Inactive'
+          });
+        } catch (error) {
+          console.error(`Error fetching attendance for student ${student.name}:`, error);
+          // Add student with no attendance data
+          attendanceData.push({
+            name: student.name,
+            email: student.email,
+            rollNumber: student.rollNumber || '',
+            phone: student.phone || '',
+            gender: student.gender || '',
+            year: student.year || '',
+            sem: student.sem || '',
+            div: student.div || '',
+            department: student.department || '',
+            totalDays: 0,
+            presentDays: 0,
+            absentDays: 0,
+            lateDays: 0,
+            leaveDays: 0,
+            attendancePercentage: '0%',
+            status: student.isActive ? 'Active' : 'Inactive'
+          });
+        }
+      }
+
+      // Create CSV content
+      const headers = [
+        'Name', 'Email', 'Roll Number', 'Phone', 'Gender', 'Year', 'Semester', 'Division', 'Department',
+        'Total Days', 'Present Days', 'Absent Days', 'Late Days', 'Leave Days', 'Attendance Percentage', 'Status'
+      ];
+      
+      const csvContent = [
+        headers.join(','),
+        ...attendanceData.map(row => [
+          row.name,
+          row.email,
+          row.rollNumber,
+          row.phone,
+          row.gender,
+          row.year,
+          row.sem,
+          row.div,
+          row.department,
+          row.totalDays,
+          row.presentDays,
+          row.absentDays,
+          row.lateDays,
+          row.leaveDays,
+          row.attendancePercentage,
+          row.status
+        ].join(','))
+      ].join('\n');
+
+      // Download CSV file
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      setShowExportModal(false);
+    } catch (error) {
+      console.error('Error exporting attendance data:', error);
+      alert('Error exporting attendance data. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExport = () => {
+    if (exportType === 'basic') {
+      exportStudents();
+    } else {
+      exportStudentsWithAttendance(exportType);
+    }
   };
 
   const getAttendanceStatus = (student: User) => {
@@ -452,11 +629,11 @@ const TeacherStudentPanel: React.FC<TeacherStudentPanelProps> = ({ user }) => {
             Add Student
           </button>
           <button
-            onClick={exportStudents}
+            onClick={() => setShowExportModal(true)}
             className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
           >
             <Download size={16} />
-            Export CSV
+            Export Data
           </button>
         </div>
       </div>
@@ -1023,6 +1200,121 @@ const TeacherStudentPanel: React.FC<TeacherStudentPanelProps> = ({ user }) => {
                   className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
                 >
                   Update Student
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Export Student Data</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Export Type</label>
+                <select
+                  value={exportType}
+                  onChange={(e) => setExportType(e.target.value as any)}
+                  className="w-full border border-gray-300 rounded-lg p-2"
+                >
+                  <option value="basic">Basic Student List</option>
+                  <option value="monthly">Monthly Attendance Report</option>
+                  <option value="custom">Custom Date Range Report</option>
+                  <option value="subject">Subject-wise Attendance Report</option>
+                </select>
+              </div>
+
+              {exportType === 'monthly' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Month</label>
+                  <input
+                    type="month"
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2"
+                  />
+                </div>
+              )}
+
+              {exportType === 'custom' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg p-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg p-2"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {exportType === 'subject' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Subject</label>
+                  <select
+                    value={selectedSubject}
+                    onChange={(e) => setSelectedSubject(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2"
+                  >
+                    <option value="">Select a subject</option>
+                    <option value="Mathematics">Mathematics</option>
+                    <option value="Physics">Physics</option>
+                    <option value="Chemistry">Chemistry</option>
+                    <option value="Computer Science">Computer Science</option>
+                    <option value="English">English</option>
+                    <option value="Engineering Drawing">Engineering Drawing</option>
+                    <option value="Programming">Programming</option>
+                    <option value="Data Structures">Data Structures</option>
+                    <option value="Database Management">Database Management</option>
+                    <option value="Web Development">Web Development</option>
+                    <option value="Software Engineering">Software Engineering</option>
+                  </select>
+                </div>
+              )}
+
+              <div className="text-sm text-gray-600">
+                {exportType === 'basic' && (
+                  <p>Export basic student information including contact details and academic info.</p>
+                )}
+                {exportType === 'monthly' && (
+                  <p>Export student attendance data for the selected month with attendance statistics.</p>
+                )}
+                {exportType === 'custom' && (
+                  <p>Export student attendance data for the custom date range with attendance statistics.</p>
+                )}
+                {exportType === 'subject' && (
+                  <p>Export student attendance data for the selected subject for the current academic year.</p>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowExportModal(false)}
+                  className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400"
+                  disabled={exporting}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleExport}
+                  disabled={exporting}
+                  className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {exporting ? 'Exporting...' : 'Export'}
                 </button>
               </div>
             </div>

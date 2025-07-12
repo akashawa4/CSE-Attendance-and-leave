@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, TrendingUp, MapPin, Download, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { attendanceService } from '../../firebase/firestore';
+import { userService, attendanceService } from '../../firebase/firestore';
 import { AttendanceRecord } from '../../types';
 import { saveAs } from 'file-saver';
 import * as XLSX from 'xlsx';
+
+const YEARS = ['1st', '2nd', '3rd', '4th'];
+const SEMS = ['1', '2', '3', '4', '5', '6', '7', '8'];
+const DIVS = ['A', 'B', 'C', 'D'];
 
 const MyAttendance: React.FC = () => {
   const { user } = useAuth();
@@ -12,6 +16,7 @@ const MyAttendance: React.FC = () => {
   const [viewType, setViewType] = useState<'calendar' | 'list'>('calendar');
   const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   // Load user's attendance data from Firestore
   useEffect(() => {
@@ -122,7 +127,10 @@ const MyAttendance: React.FC = () => {
     'CN-1'
   ];
 
-  // Add state for export subject filter
+  // Add state for export filters
+  const [exportYear, setExportYear] = useState('2nd');
+  const [exportSem, setExportSem] = useState('3');
+  const [exportDiv, setExportDiv] = useState('A');
   const [exportSubject, setExportSubject] = useState<string>('');
 
   // Download helpers
@@ -156,7 +164,7 @@ const MyAttendance: React.FC = () => {
       const row = [
         idx + 1,
         user?.name || '',
-        user?.employeeId || '',
+        user?.rollNumber || '',
         subject
       ];
       // For each day, find the attendance status for this subject
@@ -187,14 +195,91 @@ const MyAttendance: React.FC = () => {
     saveAs(blob, filename);
   };
 
-  const handleDownloadMonth = () => {
-    const year = selectedMonth.getFullYear();
-    const month = selectedMonth.getMonth();
-    const monthRecords = attendanceData.filter(record => {
-      const recordDate = new Date(record.date);
-      return recordDate.getFullYear() === year && recordDate.getMonth() === month;
+  // Filter attendance data for export
+  const getFilteredAttendance = () => {
+    return attendanceData.filter(record => {
+      const userYear = user?.year || '';
+      const userSem = user?.sem || '';
+      const userDiv = user?.div || '';
+      const matchYear = exportYear ? userYear === exportYear : true;
+      const matchSem = exportSem ? userSem === exportSem : true;
+      const matchDiv = exportDiv ? userDiv === exportDiv : true;
+      const matchSubject = exportSubject ? record.subject === exportSubject : true;
+      return matchYear && matchSem && matchDiv && matchSubject;
     });
-    downloadCSV(monthRecords, `attendance_${year}_${month + 1}.csv`);
+  };
+
+  // Helper to get YYYY-MM-DD from possible Firestore Timestamp/Date/string
+  function getDateString(dateVal: any) {
+    if (!dateVal) return '';
+    if (typeof dateVal === 'string') return dateVal;
+    if (dateVal.toDate) return dateVal.toDate().toISOString().split('T')[0];
+    if (dateVal instanceof Date) return dateVal.toISOString().split('T')[0];
+    return '';
+  }
+
+  const handleDownloadMonth = async () => {
+    setExporting(true);
+    try {
+      // 1. Fetch all students for the selected filters
+      const students = await userService.getStudentsByYearSemDiv(exportYear, exportSem, exportDiv);
+      // 2. For each student, fetch their attendance for the selected month
+      const year = selectedMonth.getFullYear();
+      const month = selectedMonth.getMonth();
+      const startDate = new Date(year, month, 1);
+      const endDate = new Date(year, month + 1, 0);
+      const allRows = [];
+      let srNo = 1;
+      for (const student of students) {
+        const logs = await attendanceService.getAttendanceByUserAndDateRange(student.id, startDate, endDate);
+        // Optionally filter by subject
+        const filteredLogs = exportSubject ? logs.filter(l => l.subject === exportSubject) : logs;
+        // Build row for this student
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const row = [
+          srNo++,
+          student.name,
+          student.rollNumber,
+          exportSubject || '-',
+        ];
+        let presentCount = 0;
+        let absentCount = 0;
+        let totalCount = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateStr = new Date(year, month, d).toISOString().split('T')[0];
+          const rec = filteredLogs.find(r => getDateString(r.date) === dateStr);
+          if (rec) {
+            row.push(rec.status);
+            totalCount++;
+            if (rec.status === 'present') presentCount++;
+            if (rec.status === 'absent') absentCount++;
+          } else {
+            row.push('');
+          }
+        }
+        const presentPercent = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+        const absentPercent = totalCount > 0 ? Math.round((absentCount / totalCount) * 100) : 0;
+        row.push(`${presentPercent}%`, `${absentPercent}%`);
+        allRows.push(row);
+      }
+      // Build header
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const dayColumns = Array.from({ length: daysInMonth }, (_, i) => {
+        const d = i + 1;
+        const dd = d.toString().padStart(2, '0');
+        const mm = (month + 1).toString().padStart(2, '0');
+        return `${dd}/${mm}/${year}`;
+      });
+      const header = ['Sr No', 'Name', 'Roll No', 'Subject', ...dayColumns, 'Present %', 'Absent %'];
+      const csv = [header, ...allRows].map(row => row.join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      saveAs(blob, `attendance_students_${exportYear}_${exportSem}_${exportDiv}_${year}_${month + 1}.csv`);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to export student attendance.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const [customRange, setCustomRange] = useState<{from: string, to: string}>({from: '', to: ''});
@@ -202,7 +287,7 @@ const MyAttendance: React.FC = () => {
     if (!customRange.from || !customRange.to) return;
     const fromDate = new Date(customRange.from);
     const toDate = new Date(customRange.to);
-    const customRecords = attendanceData.filter(record => {
+    const customRecords = getFilteredAttendance().filter(record => {
       const recordDate = new Date(record.date);
       return recordDate >= fromDate && recordDate <= toDate;
     });
@@ -214,7 +299,7 @@ const MyAttendance: React.FC = () => {
     // Get unique dates in the selected month
     const year = selectedMonth.getFullYear();
     const month = selectedMonth.getMonth();
-    const monthRecords = attendanceData.filter(record => {
+    const monthRecords = getFilteredAttendance().filter(record => {
       const recordDate = new Date(record.date);
       return recordDate.getFullYear() === year && recordDate.getMonth() === month;
     });
@@ -227,7 +312,7 @@ const MyAttendance: React.FC = () => {
     subjects.forEach(subject => {
       const row: any = {};
       row['Name'] = user?.name || '';
-      row['Roll No'] = user?.employeeId || '';
+      row['Roll No'] = user?.rollNumber || '';
       row['Subject'] = subject;
       dates.forEach(date => {
         const rec = monthRecords.find(r => r.subject === subject && r.date === date);
@@ -245,7 +330,7 @@ const MyAttendance: React.FC = () => {
       const percent = total > 0 ? Math.round((presentCount / total) * 100) : 0;
       const row: any = {};
       row['Name'] = user?.name || '';
-      row['Roll No'] = user?.employeeId || '';
+      row['Roll No'] = user?.rollNumber || '';
       row['Subject'] = `${subject} %`;
       dates.forEach(date => {
         row[date] = '';
@@ -258,7 +343,7 @@ const MyAttendance: React.FC = () => {
     const ws = XLSX.utils.json_to_sheet(rows, { header });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
-    XLSX.writeFile(wb, `attendance_${user?.employeeId || 'student'}_${year}_${month + 1}.xlsx`);
+    XLSX.writeFile(wb, `attendance_${user?.rollNumber || 'student'}_${year}_${month + 1}.xlsx`);
   };
 
   const getStatusColor = (status: string) => {
@@ -313,7 +398,46 @@ const MyAttendance: React.FC = () => {
 
   return (
     <div className="space-y-2">
-      {/* Responsive controls row */}
+      {/* Improved Filter & Export Controls Row */}
+      <div className="flex flex-wrap items-center gap-2 mb-4 p-2 bg-white rounded-lg border border-gray-200">
+        <div>
+          <label className="text-xs font-semibold text-gray-700 mr-1">Year:</label>
+          <select value={exportYear} onChange={e => setExportYear(e.target.value)} className="border rounded px-2 py-1 text-sm h-9 min-w-[80px]">
+            {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-gray-700 mr-1">Semester:</label>
+          <select value={exportSem} onChange={e => setExportSem(e.target.value)} className="border rounded px-2 py-1 text-sm h-9 min-w-[80px]">
+            {SEMS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-gray-700 mr-1">Division:</label>
+          <select value={exportDiv} onChange={e => setExportDiv(e.target.value)} className="border rounded px-2 py-1 text-sm h-9 min-w-[80px]">
+            {DIVS.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-semibold text-gray-700 mr-1">Subject:</label>
+          <select value={exportSubject} onChange={e => setExportSubject(e.target.value)} className="border rounded px-2 py-1 text-sm h-9 min-w-[120px]">
+            <option value="">All</option>
+            {FIXED_SUBJECTS.map(subj => <option key={subj} value={subj}>{subj}</option>)}
+          </select>
+        </div>
+        {/* Export/Download Controls */}
+        <button onClick={handleDownloadMonth} disabled={exporting} className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 h-9 disabled:opacity-50">
+          <Download className="w-4 h-4" />
+          <span>{exporting ? 'Exporting...' : 'Export Month'}</span>
+        </button>
+        <div className="flex items-center space-x-1">
+          <input type="date" value={customRange.from} onChange={e => setCustomRange(r => ({...r, from: e.target.value}))} className="border rounded px-1 text-xs h-9" />
+          <span>-</span>
+          <input type="date" value={customRange.to} onChange={e => setCustomRange(r => ({...r, to: e.target.value}))} className="border rounded px-1 text-xs h-9" />
+          <button onClick={handleDownloadCustom} className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs h-9">Export Custom</button>
+        </div>
+      </div>
+      {/* Page Title and rest of the content */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-0">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">My Attendance</h1>
@@ -329,24 +453,6 @@ const MyAttendance: React.FC = () => {
             >
               Calendar
             </button>
-          </div>
-          <button onClick={handleDownloadMonth} className="flex items-center space-x-1 px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 w-full sm:w-auto">
-            <Download className="w-4 h-4" />
-            <span>Export Month</span>
-          </button>
-          <div className="flex items-center space-x-1 w-full sm:w-auto">
-            <input type="date" value={customRange.from} onChange={e => setCustomRange(r => ({...r, from: e.target.value}))} className="border rounded px-1 text-xs w-full sm:w-auto" />
-            <span>-</span>
-            <input type="date" value={customRange.to} onChange={e => setCustomRange(r => ({...r, to: e.target.value}))} className="border rounded px-1 text-xs w-full sm:w-auto" />
-            <button onClick={handleDownloadCustom} className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs w-full sm:w-auto">Export Custom</button>
-          </div>
-          {/* Export Subject dropdown right next to Export Custom */}
-          <div className="w-full sm:w-auto" style={{ minWidth: 180, background: '#f3f4f6', border: '2px solid #6366f1', borderRadius: 8, padding: '8px 8px' }}>
-            <label className="text-sm font-semibold text-gray-700 mr-2">Export Subject:</label>
-            <select value={exportSubject} onChange={e => setExportSubject(e.target.value)} className="border rounded px-2 py-1 text-sm w-full sm:w-auto">
-              <option value="">All</option>
-              {FIXED_SUBJECTS.map(subj => <option key={subj} value={subj}>{subj}</option>)}
-            </select>
           </div>
         </div>
       </div>

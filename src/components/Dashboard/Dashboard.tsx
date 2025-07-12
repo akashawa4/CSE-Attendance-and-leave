@@ -68,6 +68,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onPageChange }) => {
               ? <TeacherStudentPanel user={user} />
               : <StudentManagementPanel user={user} />
           )}
+          
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+            <div className="space-y-3">
+              <button 
+                onClick={() => onPageChange?.('student-leaves')}
+                className="w-full flex items-center justify-between p-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+              >
+                <span className="text-blue-700 font-medium">View Student Leaves</span>
+                <span className="text-blue-500">→</span>
+              </button>
+              <button 
+                onClick={() => onPageChange?.('student-attendance')}
+                className="w-full flex items-center justify-between p-3 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+              >
+                <span className="text-green-700 font-medium">View Student Attendance</span>
+                <span className="text-green-500">→</span>
+              </button>
+              <button 
+                onClick={() => onPageChange?.('notifications')}
+                className="w-full flex items-center justify-between p-3 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors"
+              >
+                <span className="text-amber-700 font-medium">Check Notifications</span>
+                <span className="text-blue-500">→</span>
+              </button>
+            </div>
+          </div>
         </>
       )}
 

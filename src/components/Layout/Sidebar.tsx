@@ -36,7 +36,11 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, currentPage, onPageC
     ];
 
     const teacherItems = [
-      ...studentItems,
+      { id: 'dashboard', label: 'Dashboard', icon: Home },
+      { id: 'apply-leave', label: 'Apply Leave', icon: PlusCircle },
+      { id: 'student-leaves', label: 'Student Leaves', icon: FileText },
+      { id: 'student-attendance', label: 'Student Attendance', icon: Calendar },
+      { id: 'notifications', label: 'Notifications', icon: Bell },
       { id: 'leave-requests', label: 'Leave Approval Panel', icon: CheckCircle },
       { id: 'student-management', label: 'Student Management', icon: Users },
     ];

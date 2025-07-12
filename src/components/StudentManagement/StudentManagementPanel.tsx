@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { userService } from '../../firebase/firestore';
-import { User } from '../../types';
-import { Upload, Download, Users, Plus, Trash2, Edit, Search, Filter } from 'lucide-react';
+import { userService, attendanceService } from '../../firebase/firestore';
+import { User, AttendanceLog } from '../../types';
+import { Upload, Download, Users, Plus, Trash2, Edit, Search, Filter, Calendar, FileText, BarChart3 } from 'lucide-react';
 
 interface StudentData {
   name: string;
@@ -36,7 +36,20 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
   const [searchTerm, setSearchTerm] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportType, setExportType] = useState<'basic' | 'monthly' | 'custom' | 'subject'>('basic');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM format
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [selectedSubject, setSelectedSubject] = useState('');
+  const [exporting, setExporting] = useState(false);
   const [editingStudent, setEditingStudent] = useState<User | null>(null);
+  const [detailStudent, setDetailStudent] = useState<User | null>(null);
+  // Export filter states
+  const [exportYear, setExportYear] = useState(selectedYear);
+  const [exportSem, setExportSem] = useState(selectedSem);
+  const [exportDiv, setExportDiv] = useState(selectedDiv);
+  const [exportSubject, setExportSubject] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [newStudent, setNewStudent] = useState<Partial<User>>({
@@ -65,22 +78,28 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
   const fetchStudents = async () => {
     setLoading(true);
     try {
-      // Try to get students from organized collection first
+      let fetchedStudents = [];
       try {
         const organizedStudents = await userService.getStudentsFromOrganizedCollection(selectedYear, selectedSem, selectedDiv);
-        setStudents(organizedStudents);
+        fetchedStudents = organizedStudents;
       } catch (error) {
         // Fallback to regular collection if organized collection doesn't exist
         console.log('Organized collection not found, using regular collection');
         const allStudents = await userService.getAllUsers();
-        const filtered = allStudents.filter(student => 
-          student.role === 'student' &&
+        fetchedStudents = allStudents.filter(student =>
           student.year === selectedYear &&
           student.sem === selectedSem &&
           student.div === selectedDiv
         );
-        setStudents(filtered);
+        // If no students match, show all students for the department
+        if (fetchedStudents.length === 0) {
+          fetchedStudents = allStudents.filter(student =>
+            student.department === user.department
+          );
+        }
       }
+      // Always filter to only students
+      setStudents(fetchedStudents.filter(s => s.role === 'student'));
     } catch (error) {
       console.error('Error fetching students:', error);
     } finally {
@@ -90,9 +109,12 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
 
   const filterStudents = () => {
     const filtered = students.filter(student =>
+      student.role === 'student' &&
+      (
       student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       student.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (student.rollNumber && student.rollNumber.toLowerCase().includes(searchTerm.toLowerCase()))
+      )
     );
     setFilteredStudents(filtered);
   };
@@ -282,23 +304,147 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
   };
 
   const exportStudents = () => {
-    const exportData = filteredStudents.map(student => ({
-      name: student.name,
-      email: student.email,
-      phone: student.phone || '',
-      gender: student.gender || '',
-      rollNumber: student.rollNumber || '',
-      year: student.year || '',
-      sem: student.sem || '',
-      div: student.div || '',
-      department: student.department || '',
-      status: student.isActive ? 'Active' : 'Inactive'
-    }));
+    // Filter students for export based on exportYear, exportSem, exportDiv
+    const exportData = students
+      .filter(s => s.role === 'student' && s.year === exportYear && s.sem === exportSem && s.div === exportDiv)
+      .map(student => ({
+        name: student.name,
+        email: student.email,
+        phone: student.phone || '',
+        gender: student.gender || '',
+        rollNumber: student.rollNumber || '',
+        year: student.year || '',
+        sem: student.sem || '',
+        div: student.div || '',
+        department: student.department || '',
+        status: student.isActive ? 'Active' : 'Inactive'
+      }));
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Students');
-    XLSX.writeFile(wb, `students_${selectedYear}_${selectedSem}_${selectedDiv}.xlsx`);
+    XLSX.writeFile(wb, `students_${exportYear}_${exportSem}_${exportDiv}.xlsx`);
+  };
+
+  const exportStudentsWithAttendance = async (type: 'monthly' | 'custom' | 'subject') => {
+    setExporting(true);
+    try {
+      let startDateObj: Date;
+      let endDateObj: Date;
+      let fileName: string;
+      let subject = exportSubject;
+      switch (type) {
+        case 'monthly':
+          const [year, month] = selectedMonth.split('-');
+          startDateObj = new Date(parseInt(year), parseInt(month) - 1, 1);
+          endDateObj = new Date(parseInt(year), parseInt(month), 0);
+          fileName = `student_attendance_${selectedMonth}_${exportYear}_${exportSem}_${exportDiv}.xlsx`;
+          break;
+        case 'custom':
+          if (!startDate || !endDate) {
+            alert('Please select both start and end dates');
+            return;
+          }
+          startDateObj = new Date(startDate);
+          endDateObj = new Date(endDate);
+          fileName = `student_attendance_${startDate}_to_${endDate}_${exportYear}_${exportSem}_${exportDiv}.xlsx`;
+          break;
+        case 'subject':
+          if (!subject) {
+            alert('Please select a subject');
+            return;
+          }
+          startDateObj = new Date(new Date().getFullYear(), 0, 1); // Start of current year
+          endDateObj = new Date();
+          fileName = `student_attendance_${subject}_${exportYear}_${exportSem}_${exportDiv}.xlsx`;
+          break;
+        default:
+          return;
+      }
+
+      // Filter students for export based on exportYear, exportSem, exportDiv
+      const exportStudents = students.filter(s => s.role === 'student' && s.year === exportYear && s.sem === exportSem && s.div === exportDiv);
+      const attendanceData: any[] = [];
+      for (const student of exportStudents) {
+        try {
+          let studentAttendance: AttendanceLog[] = [];
+          if (type === 'subject') {
+            const allAttendance = await attendanceService.getAttendanceByUserAndDateRange(
+              student.id,
+              startDateObj,
+              endDateObj
+            );
+            studentAttendance = allAttendance.filter(att => att.subject === subject);
+          } else {
+            studentAttendance = await attendanceService.getAttendanceByUserAndDateRange(
+              student.id,
+              startDateObj,
+              endDateObj
+            );
+          }
+          const totalDays = studentAttendance.length;
+          const presentDays = studentAttendance.filter(att => att.status === 'present').length;
+          const absentDays = studentAttendance.filter(att => att.status === 'absent').length;
+          const lateDays = studentAttendance.filter(att => att.status === 'late').length;
+          const leaveDays = studentAttendance.filter(att => att.status === 'leave').length;
+          const attendancePercentage = totalDays > 0 ? ((presentDays + lateDays) / totalDays * 100).toFixed(2) : '0';
+          attendanceData.push({
+            name: student.name,
+            email: student.email,
+            rollNumber: student.rollNumber || '',
+            phone: student.phone || '',
+            gender: student.gender || '',
+            year: student.year || '',
+            sem: student.sem || '',
+            div: student.div || '',
+            department: student.department || '',
+            totalDays,
+            presentDays,
+            absentDays,
+            lateDays,
+            leaveDays,
+            attendancePercentage: `${attendancePercentage}%`,
+            status: student.isActive ? 'Active' : 'Inactive'
+          });
+        } catch (error) {
+          attendanceData.push({
+            name: student.name,
+            email: student.email,
+            rollNumber: student.rollNumber || '',
+            phone: student.phone || '',
+            gender: student.gender || '',
+            year: student.year || '',
+            sem: student.sem || '',
+            div: student.div || '',
+            department: student.department || '',
+            totalDays: 0,
+            presentDays: 0,
+            absentDays: 0,
+            lateDays: 0,
+            leaveDays: 0,
+            attendancePercentage: '0%',
+            status: student.isActive ? 'Active' : 'Inactive'
+          });
+        }
+      }
+      const ws = XLSX.utils.json_to_sheet(attendanceData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Student Attendance');
+      XLSX.writeFile(wb, fileName);
+      setShowExportModal(false);
+    } catch (error) {
+      alert('Error exporting attendance data. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExport = () => {
+    if (exportType === 'basic') {
+      exportStudents();
+    } else {
+      exportStudentsWithAttendance(exportType);
+    }
   };
 
   return (
@@ -386,11 +532,11 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
             Template
           </button>
           <button
-            onClick={exportStudents}
+            onClick={() => setShowExportModal(true)}
             className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700"
           >
             <Download size={16} />
-            Export
+            Export Data
           </button>
         </div>
       </div>
@@ -418,7 +564,11 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
               </tr>
             ) : (
               filteredStudents.map((student) => (
-                <tr key={student.id} className="hover:bg-gray-50">
+                <tr
+                  key={student.id}
+                  className="hover:bg-gray-50 cursor-pointer"
+                  onClick={() => setDetailStudent(student)}
+                >
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <div className="flex-shrink-0 h-10 w-10">
@@ -452,13 +602,13 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex gap-2">
                       <button
-                        onClick={() => setEditingStudent(student)}
+                        onClick={e => { e.stopPropagation(); setEditingStudent(student); }}
                         className="text-indigo-600 hover:text-indigo-900"
                       >
                         <Edit size={16} />
                       </button>
                       <button
-                        onClick={() => deleteStudent(student.id)}
+                        onClick={e => { e.stopPropagation(); deleteStudent(student.id); }}
                         className="text-red-600 hover:text-red-900"
                       >
                         <Trash2 size={16} />
@@ -740,6 +890,207 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
                   Update Student
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Export Student Data</h3>
+            <div className="space-y-4">
+              {/* Export Filters */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Year</label>
+                  <select
+                    value={exportYear}
+                    onChange={e => setExportYear(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2"
+                  >
+                    {YEARS.map(year => (
+                      <option key={year} value={year}>{year}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Semester</label>
+                  <select
+                    value={exportSem}
+                    onChange={e => setExportSem(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2"
+                  >
+                    {SEMS.map(sem => (
+                      <option key={sem} value={sem}>{sem}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Division</label>
+                  <select
+                    value={exportDiv}
+                    onChange={e => setExportDiv(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2"
+                  >
+                    {DIVS.map(div => (
+                      <option key={div} value={div}>{div}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Subject (for subject-wise export)</label>
+                  <select
+                    value={exportSubject}
+                    onChange={e => setExportSubject(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2"
+                  >
+                    <option value="">Select a subject</option>
+                    <option value="Mathematics">Mathematics</option>
+                    <option value="Physics">Physics</option>
+                    <option value="Chemistry">Chemistry</option>
+                    <option value="Computer Science">Computer Science</option>
+                    <option value="English">English</option>
+                    <option value="Engineering Drawing">Engineering Drawing</option>
+                    <option value="Programming">Programming</option>
+                    <option value="Data Structures">Data Structures</option>
+                    <option value="Database Management">Database Management</option>
+                    <option value="Web Development">Web Development</option>
+                    <option value="Software Engineering">Software Engineering</option>
+                  </select>
+                </div>
+              </div>
+              {/* Existing export type and date/month/subject selectors remain below */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Export Type</label>
+                <select
+                  value={exportType}
+                  onChange={(e) => setExportType(e.target.value as any)}
+                  className="w-full border border-gray-300 rounded-lg p-2"
+                >
+                  <option value="basic">Basic Student List</option>
+                  <option value="monthly">Monthly Attendance Report</option>
+                  <option value="custom">Custom Date Range Report</option>
+                  <option value="subject">Subject-wise Attendance Report</option>
+                </select>
+              </div>
+              {exportType === 'monthly' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Month</label>
+                  <input
+                    type="month"
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2"
+                  />
+                </div>
+              )}
+              {exportType === 'custom' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Start Date</label>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg p-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">End Date</label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg p-2"
+                    />
+                  </div>
+                </div>
+              )}
+              {exportType === 'subject' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Subject</label>
+                  <select
+                    value={selectedSubject}
+                    onChange={(e) => setSelectedSubject(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg p-2"
+                  >
+                    <option value="">Select a subject</option>
+                    <option value="Mathematics">Mathematics</option>
+                    <option value="Physics">Physics</option>
+                    <option value="Chemistry">Chemistry</option>
+                    <option value="Computer Science">Computer Science</option>
+                    <option value="English">English</option>
+                    <option value="Engineering Drawing">Engineering Drawing</option>
+                    <option value="Programming">Programming</option>
+                    <option value="Data Structures">Data Structures</option>
+                    <option value="Database Management">Database Management</option>
+                    <option value="Web Development">Web Development</option>
+                    <option value="Software Engineering">Software Engineering</option>
+                  </select>
+                </div>
+              )}
+              <div className="text-sm text-gray-600">
+                {exportType === 'basic' && (
+                  <p>Export basic student information including contact details and academic info.</p>
+                )}
+                {exportType === 'monthly' && (
+                  <p>Export student attendance data for the selected month with attendance statistics.</p>
+                )}
+                {exportType === 'custom' && (
+                  <p>Export student attendance data for the custom date range with attendance statistics.</p>
+                )}
+                {exportType === 'subject' && (
+                  <p>Export student attendance data for the selected subject for the current academic year.</p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowExportModal(false)}
+                  className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400"
+                  disabled={exporting}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleExport}
+                  disabled={exporting}
+                  className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {exporting ? 'Exporting...' : 'Export'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailStudent && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Student Details</h3>
+            <div className="space-y-2">
+              <div><strong>Name:</strong> {detailStudent.name}</div>
+              <div><strong>Email:</strong> {detailStudent.email}</div>
+              <div><strong>Roll Number:</strong> {detailStudent.rollNumber}</div>
+              <div><strong>Phone:</strong> {detailStudent.phone || '-'}</div>
+              <div><strong>Gender:</strong> {detailStudent.gender || '-'}</div>
+              <div><strong>Year:</strong> {detailStudent.year}</div>
+              <div><strong>Semester:</strong> {detailStudent.sem}</div>
+              <div><strong>Division:</strong> {detailStudent.div}</div>
+              <div><strong>Department:</strong> {detailStudent.department}</div>
+              <div><strong>Status:</strong> {detailStudent.isActive ? 'Active' : 'Inactive'}</div>
+              <div><strong>Created At:</strong> {detailStudent.createdAt ? new Date(detailStudent.createdAt).toLocaleString() : '-'}</div>
+              {/* Add more fields as needed */}
+            </div>
+            <div className="flex justify-end mt-4">
+              <button
+                onClick={() => setDetailStudent(null)}
+                className="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

@@ -89,7 +89,7 @@ const ESLBiometricIntegration: React.FC = () => {
       const eslData = lines.map((line, index) => {
         const parts = line.split(',');
         return {
-          employeeId: parts[0]?.trim(),
+          rollNumber: parts[0]?.trim(),
           employeeName: parts[1]?.trim(),
           date: parts[2]?.trim(),
           clockIn: parts[3]?.trim(),
@@ -97,7 +97,7 @@ const ESLBiometricIntegration: React.FC = () => {
           deviceId: parts[5]?.trim() || 'ESL001',
           location: parts[6]?.trim() || 'Main Gate'
         };
-      }).filter(record => record.employeeId && record.date);
+      }).filter(record => record.rollNumber && record.date);
 
       await attendanceService.importESLAttendanceData(eslData);
       

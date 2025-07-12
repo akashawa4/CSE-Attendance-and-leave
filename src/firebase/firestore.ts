@@ -617,7 +617,7 @@ export const attendanceService = {
       const attendanceRef = doc(collection(db, COLLECTIONS.ATTENDANCE));
       const attendanceData = {
         id: attendanceRef.id,
-        userId: record.employeeId || record.userId,
+        userId: record.rollNumber || record.userId,
         userName: record.employeeName || record.userName,
         date: new Date(record.date),
         clockIn: record.clockIn,
@@ -726,6 +726,21 @@ export const notificationService = {
       read: true,
       readAt: serverTimestamp()
     });
+  },
+
+  // Archive notification
+  async archiveNotification(notificationId: string): Promise<void> {
+    const notificationRef = doc(db, COLLECTIONS.NOTIFICATIONS, notificationId);
+    await updateDoc(notificationRef, {
+      archived: true,
+      archivedAt: serverTimestamp()
+    });
+  },
+
+  // Delete notification
+  async deleteNotification(notificationId: string): Promise<void> {
+    const notificationRef = doc(db, COLLECTIONS.NOTIFICATIONS, notificationId);
+    await deleteDoc(notificationRef);
   },
 
   // Get unread notifications count

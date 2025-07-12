@@ -39,7 +39,7 @@ const mockUsers: User[] = [
     isActive: true,
     avatar: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?auto=compress&cs=tinysrgb&w=150',
     phone: '+91 90000 00001',
-    employeeId: 'STU001',
+    rollNumber: 'STU001',
     joiningDate: '2022-08-01',
     designation: 'Student'
   },
@@ -53,7 +53,7 @@ const mockUsers: User[] = [
     isActive: true,
     avatar: 'https://images.pexels.com/photos/936126/pexels-photo-936126.jpeg?auto=compress&cs=tinysrgb&w=150',
     phone: '+91 90000 00002',
-    employeeId: 'TCH001',
+    rollNumber: 'TCH001',
     joiningDate: '2020-01-15',
     designation: 'Teacher'
   },
@@ -67,7 +67,7 @@ const mockUsers: User[] = [
     isActive: true,
     avatar: 'https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?auto=compress&cs=tinysrgb&w=150',
     phone: '+91 90000 00003',
-    employeeId: 'HOD001',
+    rollNumber: 'HOD001',
     joiningDate: '2018-06-01',
     designation: 'Head of Department'
   }
@@ -259,7 +259,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         accessLevel: userData.accessLevel || 'basic',
         isActive: true,
         phone: userData.phone,
-        employeeId: userData.employeeId,
+        rollNumber: userData.rollNumber,
         joiningDate: userData.joiningDate,
         designation: userData.designation,
         createdAt: new Date().toISOString(),

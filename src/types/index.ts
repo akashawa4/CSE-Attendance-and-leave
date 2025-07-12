@@ -8,7 +8,7 @@ export interface User {
   avatar?: string;
   isActive: boolean;
   phone?: string;
-  employeeId?: string;
+  rollNumber?: string;
   joiningDate?: string;
   designation?: string;
   gender?: string;

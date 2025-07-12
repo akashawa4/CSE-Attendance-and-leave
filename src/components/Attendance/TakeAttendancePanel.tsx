@@ -47,7 +47,7 @@ const TakeAttendancePanel: React.FC = () => {
   }, [year, sem, div]);
 
   const handleMarkAllPresent = () => {
-    setPresentRolls(students.map(s => s.employeeId || s.id).join(','));
+    setPresentRolls(students.map(s => s.rollNumber || s.id).join(','));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -56,8 +56,8 @@ const TakeAttendancePanel: React.FC = () => {
       .split(/[\s,]+/)
       .map(r => r.trim())
       .filter(r => r.length > 0);
-    const presentStudents = students.filter(s => presentList.includes(s.employeeId || s.id));
-    const absentStudents = students.filter(s => !presentList.includes(s.employeeId || s.id));
+    const presentStudents = students.filter(s => presentList.includes(s.rollNumber || s.id));
+    const absentStudents = students.filter(s => !presentList.includes(s.rollNumber || s.id));
     setPresent(presentStudents);
     setAbsent(absentStudents);
     setSubmitted(true);
@@ -67,7 +67,7 @@ const TakeAttendancePanel: React.FC = () => {
         userId: s.id,
         userName: s.name,
         date: todayDate,
-        status: presentList.includes(s.employeeId || s.id) ? 'present' : 'absent',
+        status: presentList.includes(s.rollNumber || s.id) ? 'present' : 'absent',
         subject,
         notes: note,
         clockIn: '',
@@ -77,7 +77,7 @@ const TakeAttendancePanel: React.FC = () => {
   };
 
   const handleCopy = (list: User[]) => {
-    navigator.clipboard.writeText(list.map(s => `${s.name} (${s.employeeId || s.id})`).join(', '));
+    navigator.clipboard.writeText(list.map(s => `${s.name} (${s.rollNumber || s.id})`).join(', '));
   };
 
   return (
@@ -142,7 +142,7 @@ const TakeAttendancePanel: React.FC = () => {
               <button onClick={() => handleCopy(present)} className="text-xs text-blue-600 hover:underline">Copy</button>
             </div>
             <div className="text-sm text-green-900">
-              {present.length === 0 ? 'None' : present.map(s => `${s.name} (${s.employeeId || s.id})`).join(', ')}
+              {present.length === 0 ? 'None' : present.map(s => `${s.name} (${s.rollNumber || s.id})`).join(', ')}
             </div>
           </div>
           <div className="bg-red-50 p-3 rounded">
@@ -151,7 +151,7 @@ const TakeAttendancePanel: React.FC = () => {
               <button onClick={() => handleCopy(absent)} className="text-xs text-blue-600 hover:underline">Copy</button>
             </div>
             <div className="text-sm text-red-900">
-              {absent.length === 0 ? 'None' : absent.map(s => `${s.name} (${s.employeeId || s.id})`).join(', ')}
+              {absent.length === 0 ? 'None' : absent.map(s => `${s.name} (${s.rollNumber || s.id})`).join(', ')}
             </div>
           </div>
         </div>
