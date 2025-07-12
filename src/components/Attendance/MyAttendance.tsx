@@ -17,6 +17,7 @@ const MyAttendance: React.FC = () => {
   const [attendanceData, setAttendanceData] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [customRange, setCustomRange] = useState<{from: string, to: string}>({from: '', to: ''});
 
   // Load user's attendance data from Firestore
   useEffect(() => {
@@ -221,21 +222,28 @@ const MyAttendance: React.FC = () => {
   const handleDownloadMonth = async () => {
     setExporting(true);
     try {
-      // 1. Fetch all students for the selected filters
       const students = await userService.getStudentsByYearSemDiv(exportYear, exportSem, exportDiv);
-      // 2. For each student, fetch their attendance for the selected month
       const year = selectedMonth.getFullYear();
       const month = selectedMonth.getMonth();
       const startDate = new Date(year, month, 1);
       const endDate = new Date(year, month + 1, 0);
       const allRows = [];
       let srNo = 1;
+      const today = new Date();
+      const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const dayColumns = Array.from({ length: daysInMonth }, (_, i) => {
+        const d = i + 1;
+        const dd = d.toString().padStart(2, '0');
+        const mm = (month + 1).toString().padStart(2, '0');
+        return `${dd}/${mm}/${year}`;
+      });
+      // Only count up to today if current month, else all days
+      const lastDay = isCurrentMonth ? today.getDate() : daysInMonth;
+      const allDateStrs = Array.from({ length: lastDay }, (_, i) => new Date(year, month, i + 1).toISOString().split('T')[0]);
       for (const student of students) {
         const logs = await attendanceService.getAttendanceByUserAndDateRange(student.id, startDate, endDate);
-        // Optionally filter by subject
         const filteredLogs = exportSubject ? logs.filter(l => l.subject === exportSubject) : logs;
-        // Build row for this student
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
         const row = [
           srNo++,
           student.name,
@@ -244,33 +252,24 @@ const MyAttendance: React.FC = () => {
         ];
         let presentCount = 0;
         let absentCount = 0;
-        let totalCount = 0;
-        for (let d = 1; d <= daysInMonth; d++) {
-          const dateStr = new Date(year, month, d).toISOString().split('T')[0];
+        for (const dateStr of allDateStrs) {
           const rec = filteredLogs.find(r => getDateString(r.date) === dateStr);
           if (rec) {
             row.push(rec.status);
-            totalCount++;
             if (rec.status === 'present') presentCount++;
             if (rec.status === 'absent') absentCount++;
           } else {
-            row.push('');
+            row.push('absent');
+            absentCount++;
           }
         }
-        const presentPercent = totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
-        const absentPercent = totalCount > 0 ? Math.round((absentCount / totalCount) * 100) : 0;
+        const totalDays = allDateStrs.length;
+        const presentPercent = totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 0;
+        const absentPercent = totalDays > 0 ? Math.round((absentCount / totalDays) * 100) : 0;
         row.push(`${presentPercent}%`, `${absentPercent}%`);
         allRows.push(row);
       }
-      // Build header
-      const daysInMonth = new Date(year, month + 1, 0).getDate();
-      const dayColumns = Array.from({ length: daysInMonth }, (_, i) => {
-        const d = i + 1;
-        const dd = d.toString().padStart(2, '0');
-        const mm = (month + 1).toString().padStart(2, '0');
-        return `${dd}/${mm}/${year}`;
-      });
-      const header = ['Sr No', 'Name', 'Roll No', 'Subject', ...dayColumns, 'Present %', 'Absent %'];
+      const header = ['Sr No', 'Name', 'Roll No', 'Subject', ...dayColumns.slice(0, lastDay), 'Present %', 'Absent %'];
       const csv = [header, ...allRows].map(row => row.join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       saveAs(blob, `attendance_students_${exportYear}_${exportSem}_${exportDiv}_${year}_${month + 1}.csv`);
@@ -282,16 +281,70 @@ const MyAttendance: React.FC = () => {
     }
   };
 
-  const [customRange, setCustomRange] = useState<{from: string, to: string}>({from: '', to: ''});
-  const handleDownloadCustom = () => {
+  const handleDownloadCustom = async () => {
     if (!customRange.from || !customRange.to) return;
-    const fromDate = new Date(customRange.from);
-    const toDate = new Date(customRange.to);
-    const customRecords = getFilteredAttendance().filter(record => {
-      const recordDate = new Date(record.date);
-      return recordDate >= fromDate && recordDate <= toDate;
-    });
-    downloadCSV(customRecords, `attendance_${customRange.from}_to_${customRange.to}.csv`);
+    setExporting(true);
+    try {
+      const students = await userService.getStudentsByYearSemDiv(exportYear, exportSem, exportDiv);
+      const fromDate = new Date(customRange.from);
+      const toDate = new Date(customRange.to);
+      const allRows = [];
+      let srNo = 1;
+      const today = new Date();
+      // Only count up to today if range includes future dates
+      let lastDate = toDate;
+      if (toDate > today) lastDate = today;
+      // Build list of all days in range (up to today if needed)
+      const days = [];
+      let current = new Date(fromDate);
+      while (current <= lastDate) {
+        days.push(current.toISOString().split('T')[0]);
+        current.setDate(current.getDate() + 1);
+      }
+      for (const student of students) {
+        const logs = await attendanceService.getAttendanceByUserAndDateRange(student.id, fromDate, toDate);
+        const filteredLogs = exportSubject ? logs.filter(l => l.subject === exportSubject) : logs;
+        const row = [
+          srNo++,
+          student.name,
+          student.rollNumber,
+          exportSubject || '-',
+        ];
+        let presentCount = 0;
+        let absentCount = 0;
+        for (const dateStr of days) {
+          const rec = filteredLogs.find(r => getDateString(r.date) === dateStr);
+          if (rec) {
+            row.push(rec.status);
+            if (rec.status === 'present') presentCount++;
+            if (rec.status === 'absent') absentCount++;
+          } else {
+            row.push('absent');
+            absentCount++;
+          }
+        }
+        const totalDays = days.length;
+        const presentPercent = totalDays > 0 ? Math.round((presentCount / totalDays) * 100) : 0;
+        const absentPercent = totalDays > 0 ? Math.round((absentCount / totalDays) * 100) : 0;
+        row.push(`${presentPercent}%`, `${absentPercent}%`);
+        allRows.push(row);
+      }
+      const headerDays = days.map(dateStr => {
+        const d = dateStr.split('-')[2];
+        const m = dateStr.split('-')[1];
+        const y = dateStr.split('-')[0];
+        return `${d}/${m}/${y}`;
+      });
+      const header = ['Sr No', 'Name', 'Roll No', 'Subject', ...headerDays, 'Present %', 'Absent %'];
+      const csv = [header, ...allRows].map(row => row.join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      saveAs(blob, `attendance_students_${exportYear}_${exportSem}_${exportDiv}_${customRange.from}_to_${customRange.to}.csv`);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to export student attendance.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleDownloadExcel = () => {
@@ -434,7 +487,7 @@ const MyAttendance: React.FC = () => {
           <input type="date" value={customRange.from} onChange={e => setCustomRange(r => ({...r, from: e.target.value}))} className="border rounded px-1 text-xs h-9" />
           <span>-</span>
           <input type="date" value={customRange.to} onChange={e => setCustomRange(r => ({...r, to: e.target.value}))} className="border rounded px-1 text-xs h-9" />
-          <button onClick={handleDownloadCustom} className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs h-9">Export Custom</button>
+          <button onClick={handleDownloadCustom} disabled={exporting} className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs h-9 disabled:opacity-50">{exporting ? 'Exporting...' : 'Export Custom'}</button>
         </div>
       </div>
       {/* Page Title and rest of the content */}
