@@ -56,27 +56,31 @@ const TakeAttendancePanel: React.FC = () => {
       .split(/[\s,]+/)
       .map(r => r.trim())
       .filter(r => r.length > 0);
-    const presentStudents = students.filter(s => presentList.includes(s.rollNumber || s.id));
-    const absentStudents = students.filter(s => !presentList.includes(s.rollNumber || s.id));
+    // Ensure present and absent lists are mutually exclusive and unique
+    const presentSet = new Set(presentList);
+    const presentStudents = students.filter(s => presentSet.has(String(s.rollNumber || s.id)));
+    const absentStudents = students.filter(s => !presentSet.has(String(s.rollNumber || s.id)));
     setPresent(presentStudents);
     setAbsent(absentStudents);
     setSubmitted(true);
-    // Save attendance to Firestore
-    for (const s of students) {
-      await attendanceService.markAttendance({
-        userId: s.id,
-        userName: s.name,
-        rollNumber: s.rollNumber, // Ensure rollNumber is passed
-        date: todayStr, // Pass as string YYYY-MM-DD
-        status: presentList.includes(s.rollNumber || s.id) ? 'present' : 'absent',
-        subject,
-        notes: note,
-        createdAt: new Date(),
-        year, // add year
-        sem,  // add sem
-        div,  // add div
-      });
-    }
+    // Save attendance to Firestore in parallel
+    await Promise.all(
+      students.map(s =>
+        attendanceService.markAttendance({
+          userId: s.id,
+          userName: s.name,
+          rollNumber: s.rollNumber, // Ensure rollNumber is passed
+          date: todayStr, // Pass as string YYYY-MM-DD
+          status: presentSet.has(String(s.rollNumber || s.id)) ? 'present' : 'absent',
+          subject,
+          notes: note,
+          createdAt: new Date(),
+          year, // add year
+          sem,  // add sem
+          div,  // add div
+        })
+      )
+    );
   };
 
   const handleCopy = (list: User[]) => {
@@ -87,7 +91,7 @@ const TakeAttendancePanel: React.FC = () => {
   function uniqueStudents(list: User[]) {
     const seen = new Set();
     return list.filter(s => {
-      const key = s.rollNumber || s.id;
+      const key = String(s.rollNumber || s.id);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -159,7 +163,7 @@ const TakeAttendancePanel: React.FC = () => {
               {present.length === 0 ? 'None' : (
                 <ol className="list-decimal list-inside space-y-1">
                   {uniqueStudents(present).map((s, idx) => (
-                    <li key={s.id || s.rollNumber || idx}>{s.name} ({s.rollNumber || s.id})</li>
+                    <li key={String(s.rollNumber || s.id)}>{s.name} ({s.rollNumber || s.id})</li>
                   ))}
                 </ol>
               )}
@@ -174,7 +178,7 @@ const TakeAttendancePanel: React.FC = () => {
               {absent.length === 0 ? 'None' : (
                 <ol className="list-decimal list-inside space-y-1">
                   {uniqueStudents(absent).map((s, idx) => (
-                    <li key={s.id || s.rollNumber || idx}>{s.name} ({s.rollNumber || s.id})</li>
+                    <li key={String(s.rollNumber || s.id)}>{s.name} ({s.rollNumber || s.id})</li>
                   ))}
                 </ol>
               )}
