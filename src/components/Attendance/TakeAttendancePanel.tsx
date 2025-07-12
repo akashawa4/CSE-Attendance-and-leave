@@ -66,12 +66,15 @@ const TakeAttendancePanel: React.FC = () => {
       await attendanceService.markAttendance({
         userId: s.id,
         userName: s.name,
-        date: todayDate,
+        rollNumber: s.rollNumber, // Ensure rollNumber is passed
+        date: todayStr, // Pass as string YYYY-MM-DD
         status: presentList.includes(s.rollNumber || s.id) ? 'present' : 'absent',
         subject,
         notes: note,
-        clockIn: '',
-        createdAt: new Date()
+        createdAt: new Date(),
+        year, // add year
+        sem,  // add sem
+        div,  // add div
       });
     }
   };
@@ -79,6 +82,17 @@ const TakeAttendancePanel: React.FC = () => {
   const handleCopy = (list: User[]) => {
     navigator.clipboard.writeText(list.map(s => `${s.name} (${s.rollNumber || s.id})`).join(', '));
   };
+
+  // Helper to get unique students by rollNumber or id
+  function uniqueStudents(list: User[]) {
+    const seen = new Set();
+    return list.filter(s => {
+      const key = s.rollNumber || s.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
 
   return (
     <div className="bg-white p-4 rounded-lg border border-blue-200 shadow mb-6">
@@ -142,7 +156,13 @@ const TakeAttendancePanel: React.FC = () => {
               <button onClick={() => handleCopy(present)} className="text-xs text-blue-600 hover:underline">Copy</button>
             </div>
             <div className="text-sm text-green-900">
-              {present.length === 0 ? 'None' : present.map(s => `${s.name} (${s.rollNumber || s.id})`).join(', ')}
+              {present.length === 0 ? 'None' : (
+                <ol className="list-decimal list-inside space-y-1">
+                  {uniqueStudents(present).map((s, idx) => (
+                    <li key={s.id || s.rollNumber || idx}>{s.name} ({s.rollNumber || s.id})</li>
+                  ))}
+                </ol>
+              )}
             </div>
           </div>
           <div className="bg-red-50 p-3 rounded">
@@ -151,7 +171,13 @@ const TakeAttendancePanel: React.FC = () => {
               <button onClick={() => handleCopy(absent)} className="text-xs text-blue-600 hover:underline">Copy</button>
             </div>
             <div className="text-sm text-red-900">
-              {absent.length === 0 ? 'None' : absent.map(s => `${s.name} (${s.rollNumber || s.id})`).join(', ')}
+              {absent.length === 0 ? 'None' : (
+                <ol className="list-decimal list-inside space-y-1">
+                  {uniqueStudents(absent).map((s, idx) => (
+                    <li key={s.id || s.rollNumber || idx}>{s.name} ({s.rollNumber || s.id})</li>
+                  ))}
+                </ol>
+              )}
             </div>
           </div>
         </div>

@@ -513,15 +513,38 @@ export const leaveService = {
 // Attendance Management
 export const attendanceService = {
   // Mark attendance
-  async markAttendance(attendanceData: Omit<AttendanceLog, 'id'>): Promise<string> {
-    const attendanceRef = doc(collection(db, COLLECTIONS.ATTENDANCE));
+  async markAttendance(attendanceData: Omit<AttendanceLog, 'id'> & { rollNumber?: string, userName?: string }): Promise<string> {
+    // Extract year, sem, div, subject, rollNumber, date from attendanceData
+    const { year, sem, div, subject, rollNumber, userId, userName, date } = attendanceData;
+    if (!year || !sem || !div || !subject) {
+      throw new Error('Missing year, sem, div, or subject for organized attendance path');
+    }
+    // Ensure date is a string in YYYY-MM-DD format
+    let dateString = '';
+    if (typeof date === 'string') {
+      if ((date as string).length > 10) {
+        dateString = (date as string).split('T')[0];
+      } else {
+        dateString = date as string;
+      }
+    } else if (date instanceof Date) {
+      dateString = date.toISOString().split('T')[0];
+    } else if (date && typeof date === 'object' && typeof (date as any).toDate === 'function') {
+      dateString = (date as any).toDate().toISOString().split('T')[0];
+    }
+    const docId = `${rollNumber || userId}_${dateString}`;
+    const collectionPath = `attendance/${year}/sems/${sem}/divs/${div}/subjects/${subject}/records`;
+    const attendanceRef = doc(collection(db, collectionPath), docId);
     await setDoc(attendanceRef, {
       ...attendanceData,
-      subject: attendanceData.subject || null, // Save subject if present
-      id: attendanceRef.id,
-      createdAt: serverTimestamp()
+      rollNumber: rollNumber || userId,
+      userName: userName || '',
+      subject: subject || null,
+      id: docId,
+      createdAt: serverTimestamp(),
+      date: dateString
     });
-    return attendanceRef.id;
+    return docId;
   },
 
   // Get attendance by user and date range
@@ -679,6 +702,38 @@ export const attendanceService = {
     // 2. Fetch attendance data for the specified period
     // 3. Transform data to our format
     // 4. Import using importESLAttendanceData
+  },
+
+  // Get attendance from organized structure by year, sem, div, subject, and date range
+  async getOrganizedAttendanceByUserAndDateRange(
+    rollNumber: string,
+    year: string,
+    sem: string,
+    div: string,
+    subject: string,
+    startDate: Date,
+    endDate: Date
+  ): Promise<AttendanceLog[]> {
+    // Path: attendance/{year}/sems/{sem}/divs/{div}/subjects/{subject}/records
+    const collectionPath = `attendance/${year}/sems/${sem}/divs/${div}/subjects/${subject}/records`;
+    const recordsRef = collection(db, collectionPath);
+    const q = query(
+      recordsRef,
+      where('rollNumber', '==', rollNumber),
+      where('date', '>=', startDate),
+      where('date', '<=', endDate)
+    );
+    const querySnapshot = await getDocs(q);
+    const records = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as AttendanceLog[];
+    // Sort by date ascending
+    return records.sort((a, b) => {
+      const aDate = a.date instanceof Date ? a.date : (a.date as any)?.toDate?.() || new Date(a.date || 0);
+      const bDate = b.date instanceof Date ? b.date : (b.date as any)?.toDate?.() || new Date(b.date || 0);
+      return aDate.getTime() - bDate.getTime();
+    });
   }
 };
 

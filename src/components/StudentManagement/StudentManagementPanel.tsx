@@ -51,6 +51,8 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
   const [exportDiv, setExportDiv] = useState(selectedDiv);
   const [exportSubject, setExportSubject] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
 
   const [newStudent, setNewStudent] = useState<Partial<User>>({
     name: '',
@@ -119,7 +121,7 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
     setFilteredStudents(filtered);
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement> | { target: { files: File[] } }) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -129,9 +131,11 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
       await importStudents(data);
       setShowImportModal(false);
       fetchStudents();
-    } catch (error) {
+      setImportFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } catch (error: any) {
       console.error('Error importing students:', error);
-      alert('Error importing students. Please check the file format.');
+      alert(error.message || 'Error importing students. Please check the file format.');
     } finally {
       setUploading(false);
     }
@@ -142,12 +146,41 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
+          if (file.name.endsWith('.csv')) {
+            // Parse CSV
+            const text = e.target?.result as string;
+            const lines = text.split(/\r?\n/).filter(Boolean);
+            const headers = lines[0].split(',').map(h => h.trim());
+            const students: StudentData[] = lines.slice(1).map(line => {
+              const values = line.split(',');
+              const row: any = {};
+              headers.forEach((h, i) => { row[h] = values[i] || ''; });
+              return {
+                name: row.name || row.Name || row.NAME || '',
+                email: row.email || row.Email || row.EMAIL || '',
+                phone: row.phone || row.Phone || row.PHONE || '',
+                gender: row.gender || row.Gender || row.GENDER || '',
+                rollNumber: row.rollNumber || row.roll || row.RollNumber || row.roll_number || '',
+                year: row.year || row.Year || row.YEAR || '2nd',
+                sem: row.sem || row.Sem || row.SEM || '3',
+                div: row.div || row.Div || row.DIV || 'A',
+                department: row.department || row.Department || row.DEPARTMENT || 'Computer Science'
+              };
+            });
+            // Check required columns
+            const missing = students.find(s => !s.name || !s.email || !s.rollNumber);
+            if (missing) {
+              reject(new Error('Missing required columns (name, email, rollNumber) in one or more rows.'));
+              return;
+            }
+            resolve(students);
+          } else {
+            // Excel
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: 'array' });
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet);
-          
           const students: StudentData[] = jsonData.map((row: any) => ({
             name: row.name || row.Name || row.NAME || '',
             email: row.email || row.Email || row.EMAIL || '',
@@ -159,32 +192,51 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
             div: row.div || row.Div || row.DIV || 'A',
             department: row.department || row.Department || row.DEPARTMENT || 'Computer Science'
           }));
-
+            // Check required columns
+            const missing = students.find(s => !s.name || !s.email || !s.rollNumber);
+            if (missing) {
+              reject(new Error('Missing required columns (name, email, rollNumber) in one or more rows.'));
+              return;
+            }
           resolve(students);
+          }
         } catch (error) {
-          reject(error);
+          console.error('Error parsing file:', error, 'File type:', file.type, 'File name:', file.name);
+          reject(new Error('Failed to parse file. Please check the format and required columns.'));
         }
       };
       reader.onerror = reject;
+      if (file.name.endsWith('.csv')) {
+        reader.readAsText(file);
+      } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
       reader.readAsArrayBuffer(file);
+      } else {
+        reject(new Error('Unsupported file format. Please upload .xlsx, .xls, or .csv file.'));
+      }
     });
   };
 
   const importStudents = async (studentsData: StudentData[]) => {
     const batch = [];
-    
-    for (const studentData of studentsData) {
+    setUploadProgress(0);
+    for (let i = 0; i < studentsData.length; i++) {
+      const studentData = studentsData[i];
       if (!studentData.name || !studentData.email || !studentData.rollNumber) {
-        continue; // Skip invalid entries
+        setUploadProgress(Math.round(((i + 1) / studentsData.length) * 100));
+        continue;
       }
-
+      const safeRollNumber = String(studentData.rollNumber || '');
+      if (safeRollNumber.includes('/')) {
+        setUploadProgress(Math.round(((i + 1) / studentsData.length) * 100));
+        continue;
+      }
       const student: User = {
-        id: `student_${studentData.rollNumber}_${Date.now()}_${Math.random()}`,
+        id: `student_${safeRollNumber}_${Date.now()}_${Math.random()}`,
         name: studentData.name,
         email: studentData.email,
         phone: studentData.phone || '',
         gender: studentData.gender || '',
-        rollNumber: studentData.rollNumber,
+        rollNumber: safeRollNumber,
         year: studentData.year,
         sem: studentData.sem,
         div: studentData.div,
@@ -196,13 +248,12 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
         lastLogin: '',
         loginCount: 0
       };
-
-      // Create in both regular users collection and organized collection
       batch.push(userService.createUser(student));
       batch.push(userService.createOrganizedStudentCollection(student));
+      setUploadProgress(Math.round(((i + 1) / studentsData.length) * 100));
     }
-
     await Promise.all(batch);
+    setUploadProgress(100);
   };
 
   const addStudent = async () => {
@@ -211,14 +262,20 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
       return;
     }
 
+    const safeRollNumber = String(newStudent.rollNumber || '');
+    if (safeRollNumber.includes('/')) {
+      alert('Roll Number cannot contain slashes');
+      return;
+    }
+
     try {
       const student: User = {
-        id: `student_${newStudent.rollNumber}_${Date.now()}_${Math.random()}`,
+        id: `student_${safeRollNumber}_${Date.now()}_${Math.random()}`,
         name: newStudent.name!,
         email: newStudent.email!,
         phone: newStudent.phone || '',
         gender: newStudent.gender || '',
-        rollNumber: newStudent.rollNumber!,
+        rollNumber: safeRollNumber,
         year: newStudent.year!,
         sem: newStudent.sem!,
         div: newStudent.div!,
@@ -308,17 +365,17 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
     const exportData = students
       .filter(s => s.role === 'student' && s.year === exportYear && s.sem === exportSem && s.div === exportDiv)
       .map(student => ({
-        name: student.name,
-        email: student.email,
-        phone: student.phone || '',
-        gender: student.gender || '',
-        rollNumber: student.rollNumber || '',
-        year: student.year || '',
-        sem: student.sem || '',
-        div: student.div || '',
-        department: student.department || '',
-        status: student.isActive ? 'Active' : 'Inactive'
-      }));
+      name: student.name,
+      email: student.email,
+      phone: student.phone || '',
+      gender: student.gender || '',
+      rollNumber: student.rollNumber || '',
+      year: student.year || '',
+      sem: student.sem || '',
+      div: student.div || '',
+      department: student.department || '',
+      status: student.isActive ? 'Active' : 'Inactive'
+    }));
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     const wb = XLSX.utils.book_new();
@@ -625,37 +682,61 @@ const StudentManagementPanel: React.FC<StudentManagementPanelProps> = ({ user })
       {/* Import Modal */}
       {showImportModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="bg-white rounded-lg p-6 w-full max-w-lg relative">
+            {/* Close (X) button */}
+            <button
+              onClick={() => setShowImportModal(false)}
+              className="absolute top-3 right-3 text-gray-400 hover:text-gray-700 text-xl font-bold focus:outline-none"
+              aria-label="Close"
+            >
+              &times;
+            </button>
             <h3 className="text-lg font-semibold mb-4">Import Students from Excel</h3>
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Excel File
-                </label>
+              <div className="flex flex-col sm:flex-row gap-2 items-center">
+                <label className="block text-sm font-medium text-gray-700 mb-2 sm:mb-0">
+                  <span className="mr-2">Select Excel File</span>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleFileUpload}
+                    accept=".xlsx,.xls,.csv"
+                    onChange={e => { setImportFile(e.target.files?.[0] || null); }}
                   className="w-full border border-gray-300 rounded-lg p-2"
-                />
-              </div>
-              <div className="text-sm text-gray-600">
-                <p>Required columns: name, email, rollNumber</p>
-                <p>Optional columns: phone, gender, year, sem, div, department</p>
-              </div>
-              <div className="flex gap-2">
+                    style={{ maxWidth: 220 }}
+                  />
+                </label>
                 <button
-                  onClick={() => setShowImportModal(false)}
-                  className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400"
+                  onClick={async () => { if (importFile) await handleFileUpload({ target: { files: [importFile] } }); }}
+                  className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 whitespace-nowrap disabled:opacity-50"
+                  disabled={!importFile || uploading}
                 >
-                  Cancel
+                  {uploading ? 'Uploading...' : 'Upload'}
                 </button>
+                {uploading && (
+                  <div className="w-full mt-2">
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                      <div className="h-2 bg-green-500" style={{ width: `${uploadProgress}%` }}></div>
+                    </div>
+                    <div className="text-xs text-gray-700 mt-1 text-center">Uploading... {uploadProgress}% complete</div>
+                  </div>
+                )}
                 <button
                   onClick={downloadTemplate}
-                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                  className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 whitespace-nowrap"
                 >
                   Download Template
+                </button>
+              </div>
+              <div className="text-sm text-gray-600">
+                <p><span className="font-semibold">Required columns:</span> name, email, rollNumber</p>
+                <p><span className="font-semibold">Optional columns:</span> phone, gender, year, sem, div, department</p>
+              </div>
+              <div className="flex justify-between items-center mt-2">
+                <button
+                  onClick={() => setShowImportModal(false)}
+                  className="text-gray-500 hover:underline bg-transparent px-2 py-1 rounded"
+                >
+                  Cancel
                 </button>
               </div>
             </div>

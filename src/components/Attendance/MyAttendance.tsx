@@ -33,11 +33,7 @@ const MyAttendance: React.FC = () => {
           id: log.id,
           userId: log.userId,
           date: typeof log.date === 'string' ? log.date : (log.date?.toISOString?.() || ''),
-          clockIn: typeof log.clockIn === 'string' ? log.clockIn : (log.clockIn?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' }) || ''),
-          clockOut: typeof log.clockOut === 'string' ? log.clockOut : (log.clockOut?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' }) || ''),
           status: log.status,
-          workingHours: typeof log.workingHours === 'string' ? log.workingHours : (log.workingHours?.toString?.() || ''),
-          overtime: log.overtime || '',
           location: log.location || '',
           subject: log.subject || '',
           notes: log.notes || '',
@@ -70,28 +66,15 @@ const MyAttendance: React.FC = () => {
     const totalDays = monthRecords.length;
 
     // Calculate average working hours
-    const workingHours = monthRecords
-      .filter(r => r.workingHours && r.workingHours !== '---')
-      .map(r => {
-        const [hours, minPart] = (r.workingHours || '0h 0m').split('h');
-        const minutes = minPart ? minPart.split('m')[0] : '0';
-        return parseInt(hours) + parseInt(minutes) / 60;
-      });
-
-    const avgHours = workingHours.length > 0 
-      ? workingHours.reduce((a, b) => a + b, 0) / workingHours.length 
-      : 0;
-
-    const avgWorkingHours = `${Math.floor(avgHours)}h ${Math.round((avgHours % 1) * 60)}m`;
-
+    // No workingHours in AttendanceRecord, so skip average working hours calculation
     return {
       totalDays,
       presentDays,
       leaveDays,
       lateDays,
-      avgWorkingHours,
-      totalOvertime: '2h 15m' // This would be calculated from overtime records
-  };
+      avgWorkingHours: '',
+      totalOvertime: ''
+    };
   };
 
   const monthStats = calculateMonthStats();
@@ -220,6 +203,10 @@ const MyAttendance: React.FC = () => {
   }
 
   const handleDownloadMonth = async () => {
+    if (!exportSubject) {
+      alert('Please select a subject to export attendance.');
+      return;
+    }
     setExporting(true);
     try {
       const students = await userService.getStudentsByYearSemDiv(exportYear, exportSem, exportDiv);
@@ -241,9 +228,18 @@ const MyAttendance: React.FC = () => {
       // Only count up to today if current month, else all days
       const lastDay = isCurrentMonth ? today.getDate() : daysInMonth;
       const allDateStrs = Array.from({ length: lastDay }, (_, i) => new Date(year, month, i + 1).toISOString().split('T')[0]);
-      for (const student of students) {
-        const logs = await attendanceService.getAttendanceByUserAndDateRange(student.id, startDate, endDate);
-        const filteredLogs = exportSubject ? logs.filter(l => l.subject === exportSubject) : logs;
+      // Fetch all attendance in parallel
+      const allLogs = await Promise.all(
+        students
+          .filter(student => !!student.rollNumber && String(student.rollNumber).trim() !== '')
+          .map(student =>
+            attendanceService.getOrganizedAttendanceByUserAndDateRange(
+              String(student.rollNumber), exportYear, exportSem, exportDiv, exportSubject, startDate, endDate
+            ).then(logs => ({ student, logs }))
+          )
+      );
+      for (const { student, logs } of allLogs) {
+        // Only one row per student per subject
         const row = [
           srNo++,
           student.name,
@@ -253,7 +249,7 @@ const MyAttendance: React.FC = () => {
         let presentCount = 0;
         let absentCount = 0;
         for (const dateStr of allDateStrs) {
-          const rec = filteredLogs.find(r => getDateString(r.date) === dateStr);
+          const rec = logs.find(r => getDateString(r.date) === dateStr);
           if (rec) {
             row.push(rec.status);
             if (rec.status === 'present') presentCount++;
@@ -269,8 +265,22 @@ const MyAttendance: React.FC = () => {
         row.push(`${presentPercent}%`, `${absentPercent}%`);
         allRows.push(row);
       }
+      // Remove duplicate students (by roll number and subject)
+      const uniqueRows = [];
+      const seen = new Set();
+      for (const row of allRows) {
+        const key = row[2] + '_' + row[3]; // rollNumber + subject
+        if (!seen.has(key)) {
+          uniqueRows.push(row);
+          seen.add(key);
+        }
+      }
+      // Fix Sr No sequencing
+      uniqueRows.forEach((row, idx) => {
+        row[0] = idx + 1;
+      });
       const header = ['Sr No', 'Name', 'Roll No', 'Subject', ...dayColumns.slice(0, lastDay), 'Present %', 'Absent %'];
-      const csv = [header, ...allRows].map(row => row.join(',')).join('\n');
+      const csv = [header, ...uniqueRows].map(row => row.join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       saveAs(blob, `attendance_students_${exportYear}_${exportSem}_${exportDiv}_${year}_${month + 1}.csv`);
     } catch (err) {
@@ -283,6 +293,10 @@ const MyAttendance: React.FC = () => {
 
   const handleDownloadCustom = async () => {
     if (!customRange.from || !customRange.to) return;
+    if (!exportSubject) {
+      alert('Please select a subject to export attendance.');
+      return;
+    }
     setExporting(true);
     try {
       const students = await userService.getStudentsByYearSemDiv(exportYear, exportSem, exportDiv);
@@ -301,9 +315,18 @@ const MyAttendance: React.FC = () => {
         days.push(current.toISOString().split('T')[0]);
         current.setDate(current.getDate() + 1);
       }
-      for (const student of students) {
-        const logs = await attendanceService.getAttendanceByUserAndDateRange(student.id, fromDate, toDate);
-        const filteredLogs = exportSubject ? logs.filter(l => l.subject === exportSubject) : logs;
+      // Fetch all attendance in parallel
+      const allLogs = await Promise.all(
+        students
+          .filter(student => !!student.rollNumber && String(student.rollNumber).trim() !== '')
+          .map(student =>
+            attendanceService.getOrganizedAttendanceByUserAndDateRange(
+              String(student.rollNumber), exportYear, exportSem, exportDiv, exportSubject, fromDate, toDate
+            ).then(logs => ({ student, logs }))
+          )
+      );
+      for (const { student, logs } of allLogs) {
+        // Only one row per student per subject
         const row = [
           srNo++,
           student.name,
@@ -313,7 +336,7 @@ const MyAttendance: React.FC = () => {
         let presentCount = 0;
         let absentCount = 0;
         for (const dateStr of days) {
-          const rec = filteredLogs.find(r => getDateString(r.date) === dateStr);
+          const rec = logs.find(r => getDateString(r.date) === dateStr);
           if (rec) {
             row.push(rec.status);
             if (rec.status === 'present') presentCount++;
@@ -329,6 +352,20 @@ const MyAttendance: React.FC = () => {
         row.push(`${presentPercent}%`, `${absentPercent}%`);
         allRows.push(row);
       }
+      // Remove duplicate students (by roll number and subject)
+      const uniqueRows = [];
+      const seen = new Set();
+      for (const row of allRows) {
+        const key = row[2] + '_' + row[3]; // rollNumber + subject
+        if (!seen.has(key)) {
+          uniqueRows.push(row);
+          seen.add(key);
+        }
+      }
+      // Fix Sr No sequencing
+      uniqueRows.forEach((row, idx) => {
+        row[0] = idx + 1;
+      });
       const headerDays = days.map(dateStr => {
         const d = dateStr.split('-')[2];
         const m = dateStr.split('-')[1];
@@ -336,7 +373,7 @@ const MyAttendance: React.FC = () => {
         return `${d}/${m}/${y}`;
       });
       const header = ['Sr No', 'Name', 'Roll No', 'Subject', ...headerDays, 'Present %', 'Absent %'];
-      const csv = [header, ...allRows].map(row => row.join(',')).join('\n');
+      const csv = [header, ...uniqueRows].map(row => row.join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       saveAs(blob, `attendance_students_${exportYear}_${exportSem}_${exportDiv}_${customRange.from}_to_${customRange.to}.csv`);
     } catch (err) {
@@ -602,7 +639,7 @@ const MyAttendance: React.FC = () => {
                           )}
                           {(day.attendance.status === 'present' || day.attendance.status === 'late') ? (
                             <div className="text-xs text-gray-600 text-center">
-                              {day.attendance.clockIn} - {day.attendance.clockOut}
+                              {/* No clockIn/clockOut fields in AttendanceRecord */}
                             </div>
                           ) : null}
                         </div>
@@ -669,16 +706,13 @@ const MyAttendance: React.FC = () => {
                           {record.subject || '-'}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {record.clockIn}
+                          {/* No clockIn field in AttendanceRecord */}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {record.clockOut}
+                          {/* No clockOut field in AttendanceRecord */}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">{record.workingHours}</div>
-                          {record.overtime && (
-                            <div className="text-xs text-orange-600">+{record.overtime} overtime</div>
-                          )}
+                          {/* No workingHours or overtime fields in AttendanceRecord */}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(record.status)}`}>
@@ -686,10 +720,7 @@ const MyAttendance: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center text-sm text-gray-900">
-                            <MapPin className="w-4 h-4 text-gray-400 mr-1" />
-                            {record.location}
-                          </div>
+                          {/* No location field in AttendanceRecord */}
                         </td>
                       </tr>
                     ))}
